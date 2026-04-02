@@ -1,7 +1,7 @@
 //
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 // Ryx — Global Connection Pool
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 //
 // Design decision: we maintain a single, global connection pool per process,
 // stored in a `OnceLock<AnyPool>`. This mirrors how Django's database layer
@@ -22,7 +22,7 @@
 // Thread safety:
 //   `OnceLock` guarantees that initialization happens exactly once even if
 //   multiple threads race to call `setup()`. Subsequent reads are lock-free.
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 
 use std::sync::OnceLock;
 
@@ -34,13 +34,13 @@ use tracing::{debug, info};
 
 use crate::errors::{RyxError, RyxResult};
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 // Global singleton
 //
 // We use `std::sync::OnceLock` (stable since Rust 1.70) rather than
 // `once_cell::sync::OnceCell` to avoid an extra dependency for this specific
 // use case. OnceLock is conceptually identical.
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 
 /// The single global connection pool for this process.
 ///
@@ -48,12 +48,12 @@ use crate::errors::{RyxError, RyxResult};
 /// the pool via `get()`.
 static POOL: OnceLock<AnyPool> = OnceLock::new();
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 // Pool configuration options
 //
 // We expose a subset of sqlx's PoolOptions to Python so users can tune the
 // pool without having to write Rust. These map 1:1 to sqlx fields.
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 
 /// Configuration options for the connection pool.
 ///

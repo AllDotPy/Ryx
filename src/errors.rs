@@ -1,7 +1,7 @@
 //
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 // Ryx — Unified Error Type
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 //
 // Design decision: we define a single RyxError enum that covers every failure
 // mode across the entire crate (database errors, type mapping errors, pool
@@ -19,7 +19,7 @@
 //   - ...
 //
 // This keeps the Python surface clean: users never see "PyRuntimeError: sqlx::…"
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -93,7 +93,7 @@ pub enum RyxError {
     Internal(String),
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 // PyO3 conversion: RyxError → Python exception
 //
 // PyO3 requires `From<RyxError> for PyErr` so that functions marked
@@ -107,7 +107,7 @@ pub enum RyxError {
 // TODO: In a future version we should define custom Python exception classes
 // (via `pyo3::create_exception!`) so users can do `except Ryx.DoesNotExist`.
 // For now we keep it simple to avoid complexity in the foundation layer.
-// ──────────────────────────────────────────────────────────────────────────────
+// ###
 impl From<RyxError> for PyErr {
     fn from(err: RyxError) -> PyErr {
         match &err {
