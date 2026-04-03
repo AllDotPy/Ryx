@@ -1,0 +1,95 @@
+---
+sidebar_position: 6
+---
+
+# Bulk Operations
+
+When you need to work with many records at once, bulk operations are significantly faster than per-instance operations.
+
+## bulk_create
+
+Multi-row INSERT with batching:
+
+```python
+from ryx.bulk import bulk_create
+
+posts = [
+    Post(title=f"Post {i}", slug=f"post-{i}", views=i * 10)
+    for i in range(1000)
+]
+
+created = await bulk_create(posts, batch_size=100)
+print(f"Created {len(created)} posts")
+```
+
+### How It Works
+
+Records are split into batches of `batch_size`. Each batch becomes a single multi-row INSERT:
+
+```sql
+INSERT INTO "posts" ("title", "slug", "views") VALUES
+    ('Post 0', 'post-0', 0),
+    ('Post 1', 'post-1', 10),
+    ...
+    ('Post 99', 'post-99', 990)
+```
+
+### Trade-offs
+
+- Bypasses `clean()`, `before_save`, `after_save`, and signals
+- Does not populate `pk` on instances (database-generated)
+- Much faster than calling `save()` in a loop
+
+## bulk_update
+
+Individual UPDATEs wrapped in a transaction:
+
+```python
+from ryx.bulk import bulk_update
+
+posts = await Post.objects.filter(active=True)
+for post in posts:
+    post.views += 1
+
+await bulk_update(posts, fields=["views"])
+```
+
+## bulk_delete
+
+DELETE with IN clause:
+
+```python
+from ryx.bulk import bulk_delete
+
+deleted = await bulk_delete(Post.objects.filter(views=0))
+print(f"Deleted {deleted} posts")
+```
+
+## stream
+
+Async generator for processing large result sets without loading everything into memory:
+
+```python
+from ryx.bulk import stream
+
+async for batch in stream(Post.objects.all(), page_size=500):
+    for post in batch:
+        process(post)
+```
+
+Uses LIMIT/OFFSET pagination under the hood.
+
+## Performance Comparison
+
+| Operation | 100 records | 10,000 records |
+|---|---|---|
+| `save()` in loop | ~200ms | ~20s |
+| `bulk_create` | ~10ms | ~100ms |
+
+:::tip
+Always prefer bulk operations for data imports, migrations, and batch processing.
+:::
+
+## Next Steps
+
+→ **[Advanced](/advanced/transactions)** — Transactions, validation, signals
