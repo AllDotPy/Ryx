@@ -1,0 +1,83 @@
+---
+sidebar_position: 5
+---
+
+# Hooks
+
+Hooks are per-instance lifecycle methods you override on your model class.
+
+## Available Hooks
+
+```python
+class Order(Model):
+    total  = DecimalField(max_digits=10, decimal_places=2)
+    status = CharField(max_length=20, default="pending")
+
+    async def clean(self) -> None:
+        """Cross-field validation. Called by full_clean()."""
+        if self.total <= 0:
+            raise ValidationError({"total": ["Total must be positive"]})
+
+    async def before_save(self, created: bool) -> None:
+        """Called before INSERT (created=True) or UPDATE (created=False)."""
+        if created:
+            self.status = "pending"
+
+    async def after_save(self, created: bool) -> None:
+        """Called after INSERT or UPDATE."""
+        if created:
+            await notify_user(self.user_id, "Order created")
+
+    async def before_delete(self) -> None:
+        """Called before DELETE. Raise to prevent deletion."""
+        if self.status == "shipped":
+            raise ValueError("Cannot delete a shipped order")
+
+    async def after_delete(self) -> None:
+        """Called after DELETE."""
+        await notify_user(self.user_id, "Order cancelled")
+```
+
+## Hooks vs Signals
+
+| | Hooks | Signals |
+|---|---|---|
+| **Scope** | Per-instance | Global |
+| **Definition** | Override on model | Connect anywhere |
+| **Coupling** | Tight (in model) | Loose (decoupled) |
+| **Use for** | Model-specific logic | Cross-cutting concerns |
+
+### When to Use Hooks
+
+- Setting default values based on other fields
+- Model-specific validation
+- Triggering actions tied to this specific model
+
+### When to Use Signals
+
+- Logging/auditing across many models
+- Cache invalidation
+- Notifications that involve multiple systems
+- Decoupled side effects
+
+## Execution Order
+
+```
+save()
+  → full_clean()
+    → field validators
+    → clean()
+  → before_save(created)
+  → pre_save signal
+  → SQL INSERT/UPDATE
+  → post_save signal
+  → after_save(created)
+```
+
+:::warning
+Bulk operations (`bulk_create`, `bulk_update`, `bulk_delete`, `.update()`, `.delete()`) bypass per-instance hooks. Use signals for bulk-aware logic.
+:::
+
+## Next Steps
+
+→ **[Caching](./caching)** — Query result caching

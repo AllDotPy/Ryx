@@ -1,0 +1,88 @@
+---
+sidebar_position: 6
+---
+
+# Caching
+
+Ryx includes a pluggable query cache that stores query results and auto-invalidates on writes.
+
+## Quick Setup
+
+```python
+import ryx
+
+# Enable in-memory LRU cache
+ryx.configure_cache(ttl=300, max_size=1000)  # 5 min TTL, 1000 entries
+```
+
+## Cached Queries
+
+```python
+# First call — executes query, caches result
+posts = await Post.objects.filter(active=True).cache()
+
+# Second call — returns cached result (no DB query)
+posts = await Post.objects.filter(active=True).cache()
+
+# After a write — cache is invalidated
+await Post.objects.create(title="New post", slug="new")
+
+# Next call — executes query again, caches new result
+posts = await Post.objects.filter(active=True).cache()
+```
+
+## How It Works
+
+1. **Cache key** — SHA-256 hash of the SQL query + bound values
+2. **Storage** — Pluggable via `AbstractCache` protocol
+3. **Invalidation** — Auto-invalidated on `post_save` and `post_delete` signals
+
+## Custom Cache Backend
+
+```python
+from ryx.cache import AbstractCache
+
+class RedisCache(AbstractCache):
+    def __init__(self, redis_client):
+        self.redis = redis_client
+
+    async def get(self, key: str):
+        data = await self.redis.get(key)
+        return json.loads(data) if data else None
+
+    async def set(self, key: str, value, ttl: int):
+        await self.redis.setex(key, ttl, json.dumps(value))
+
+    async def delete(self, key: str):
+        await self.redis.delete(key)
+
+    async def clear(self):
+        await self.redis.flushdb()
+
+ryx.configure_cache(backend=RedisCache(redis_client), ttl=300)
+```
+
+## Memory Cache Options
+
+```python
+ryx.configure_cache(
+    ttl=300,        # Time-to-live in seconds
+    max_size=1000,  # Maximum number of cached queries
+)
+```
+
+## When to Cache
+
+- **Expensive queries** — Complex aggregations, large result sets
+- **Frequently read data** — Configuration, categories, tags
+- **Read-heavy endpoints** — API responses that rarely change
+
+## When NOT to Cache
+
+- **Write-heavy data** — Cache invalidation overhead
+- **Real-time requirements** — Stale data is unacceptable
+- **Unique queries** — Every query has different parameters
+
+## Next Steps
+
+→ **[Custom Lookups](./custom-lookups)** — Extend the query API
