@@ -1,0 +1,88 @@
+---
+sidebar_position: 3
+---
+
+# Reading Records
+
+## Get a Single Record
+
+```python
+# By primary key
+post = await Post.objects.get(pk=1)
+
+# By any field
+post = await Post.objects.get(slug="hello-world")
+
+# Raises DoesNotExist if not found
+# Raises MultipleObjectsReturned if more than one matches
+```
+
+## Safe Single Record Access
+
+```python
+# Returns None if not found
+post = await Post.objects.filter(slug="hello-world").first()
+
+# Returns None if empty
+post = await Post.objects.last()
+```
+
+## Get All Records
+
+```python
+all_posts = await Post.objects.all()
+```
+
+## Filtered Results
+
+```python
+active_posts = await Post.objects.filter(active=True)
+popular_posts = await Post.objects.filter(views__gte=1000)
+```
+
+## Check Existence
+
+```python
+if await Post.objects.filter(active=True).exists():
+    print("There are active posts")
+```
+
+## Count
+
+```python
+count = await Post.objects.filter(active=True).count()
+```
+
+## Slicing
+
+```python
+# First 10
+first_ten = await Post.objects.all()[:10]
+
+# Pagination
+page_two = await Post.objects.all()[10:20]
+
+# Single by index
+third = await Post.objects.all()[2]
+```
+
+## Async Iteration
+
+```python
+async for post in Post.objects.filter(active=True):
+    process(post)
+```
+
+## Streaming Large Results
+
+```python
+from ryx.bulk import stream
+
+async for batch in stream(Post.objects.filter(active=True), page_size=500):
+    for post in batch:
+        process(post)
+```
+
+## Next Steps
+
+→ **[Updating](./updating)** — Modify existing records

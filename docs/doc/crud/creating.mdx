@@ -1,0 +1,74 @@
+---
+sidebar_position: 2
+---
+
+# Creating Records
+
+## Via Manager
+
+The simplest way to create a record:
+
+```python
+post = await Post.objects.create(title="Hello World", slug="hello-world")
+print(post.pk)  # Auto-populated
+```
+
+## Via Model Instance
+
+```python
+post = Post(title="Hello World", slug="hello-world")
+await post.save()  # INSERT
+print(post.pk)
+```
+
+## get_or_create
+
+Create if it doesn't exist, otherwise return the existing record:
+
+```python
+post, created = await Post.objects.get_or_create(
+    slug="hello-world",
+    defaults={"title": "Hello World", "active": True},
+)
+
+if created:
+    print("New post created")
+else:
+    print("Post already exists")
+```
+
+## update_or_create
+
+Update if it exists, otherwise create:
+
+```python
+post, created = await Post.objects.update_or_create(
+    slug="hello-world",
+    defaults={"title": "Updated Title", "views": 0},
+)
+```
+
+## Bulk Create
+
+For inserting many records at once:
+
+```python
+from ryx.bulk import bulk_create
+
+posts = [
+    Post(title="Post 1", slug="post-1"),
+    Post(title="Post 2", slug="post-2"),
+    Post(title="Post 3", slug="post-3"),
+]
+
+created = await bulk_create(posts, batch_size=100)
+print(f"Created {len(created)} posts")
+```
+
+:::tip
+`bulk_create` bypasses per-instance hooks (`clean`, `before_save`, `after_save`) and signals for performance. Validate data beforehand.
+:::
+
+## Next Steps
+
+→ **[Reading](./reading)** — Retrieve records

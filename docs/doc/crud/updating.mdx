@@ -1,0 +1,55 @@
+---
+sidebar_position: 4
+---
+
+# Updating Records
+
+## Update Instance
+
+```python
+post = await Post.objects.get(pk=1)
+post.title = "Updated Title"
+post.views = post.views + 1
+await post.save()  # UPDATE all columns
+```
+
+## Update Specific Fields
+
+```python
+post.views = 999
+await post.save(update_fields=["views"])  # UPDATE only views
+```
+
+This generates a more efficient query:
+
+```sql
+UPDATE "posts" SET "views" = ? WHERE "id" = ?
+```
+
+## Bulk Update
+
+```python
+# Update all matching rows
+updated = await Post.objects.filter(active=False).update(active=True)
+print(f"Updated {updated} posts")
+```
+
+:::tip
+Bulk `.update()` bypasses per-instance hooks and signals. It directly executes SQL.
+:::
+
+## Bulk Update with Individual Control
+
+```python
+from ryx.bulk import bulk_update
+
+posts = await Post.objects.filter(active=True)
+for post in posts:
+    post.views += 1
+
+await bulk_update(posts, fields=["views"])
+```
+
+## Next Steps
+
+→ **[Deleting](./deleting)** — Remove records

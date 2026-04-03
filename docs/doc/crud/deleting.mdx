@@ -1,0 +1,42 @@
+---
+sidebar_position: 5
+---
+
+# Deleting Records
+
+## Delete Instance
+
+```python
+post = await Post.objects.get(pk=1)
+await post.delete()
+```
+
+This calls `before_delete` and `after_delete` hooks, and fires `pre_delete` / `post_delete` signals.
+
+## Bulk Delete
+
+```python
+deleted = await Post.objects.filter(views=0).delete()
+print(f"Deleted {deleted} posts")
+```
+
+:::warning
+Bulk `.delete()` bypasses per-instance hooks. It fires `pre_bulk_delete` and `post_bulk_delete` signals instead.
+:::
+
+## Cascade Deletes
+
+If a ForeignKey has `on_delete="CASCADE"`, deleting the parent also deletes related records:
+
+```python
+class Post(Model):
+    author = ForeignKey(Author, on_delete="CASCADE")
+
+# Deleting the author also deletes all their posts
+author = await Author.objects.get(pk=1)
+await author.delete()  # Posts are cascade-deleted by the database
+```
+
+## Next Steps
+
+→ **[Bulk Operations](./bulk-operations)** — Mass operations for performance
