@@ -1,0 +1,165 @@
+#
+# Release — Build Wheels & Publish to PyPI
+#
+# Triggered automatically when a Git tag is pushed (e.g. v0.1.0).
+# Builds wheels for all major platforms via Maturin's manylinux Docker images
+# and native macOS/Windows runners, then publishes to PyPI.
+#
+# Tag format: v*  (e.g. v0.1.0, v1.0.0, v0.2.0-beta.1)
+#
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Build wheels for all platforms
+  build-wheels:
+    name: Build Wheels — ${{ matrix.os }} (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux (manylinux) — x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: auto
+          # Linux (manylinux) — aarch64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            manylinux: auto
+          # macOS — x86_64 (Intel)
+          - os: macos-13
+            target: x86_64-apple-darwin
+            manylinux: auto
+          # macOS — aarch64 (Apple Silicon)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            manylinux: auto
+          # Windows — x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            manylinux: auto
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build wheels
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
+          manylinux: ${{ matrix.manylinux }}
+          rust-toolchain: stable
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-${{ matrix.target }}
+          path: dist/
+
+  # Build source distribution
+  build-sdist:
+    name: Build Source Distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+  #  Create GitHub Release
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG_NAME" dist/* \
+            --title "Ryx $TAG_NAME" \
+            --generate-notes \
+            --draft
+
+  #  Publish to PyPI
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    if: startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ryx
+    permissions:
+      id-token: write  # OIDC token for trusted publishing
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          pattern: wheels-*
+          merge-multiple: true
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
