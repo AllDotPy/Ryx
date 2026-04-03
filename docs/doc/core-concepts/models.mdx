@@ -1,0 +1,178 @@
+---
+sidebar_position: 2
+---
+
+# Models
+
+Models are the heart of any ORM. In Ryx, a model is a Python class that maps to a database table.
+
+## Defining a Model
+
+```python
+from ryx import Model, CharField, IntField, BooleanField, DateTimeField, ForeignKey
+
+class Author(Model):
+    name  = CharField(max_length=100)
+    email = CharField(max_length=254, unique=True)
+    bio   = CharField(max_length=500, null=True, blank=True)
+
+class Post(Model):
+    title      = CharField(max_length=200)
+    slug       = CharField(max_length=210, unique=True)
+    body       = CharField(max_length=5000, null=True, blank=True)
+    views      = IntField(default=0)
+    active     = BooleanField(default=True)
+    author     = ForeignKey(Author, on_delete="CASCADE")
+    created_at = DateTimeField(auto_now_add=True)
+    updated_at = DateTimeField(auto_now=True)
+```
+
+Each class attribute that is a `Field` instance becomes a column. The class itself becomes a table.
+
+## Table Naming
+
+By default, Ryx converts `CamelCase` class names to `snake_case` plural table names:
+
+| Class | Table |
+|---|---|
+| `Post` | `posts` |
+| `Author` | `authors` |
+| `BlogPost` | `blog_posts` |
+| `Category` | `categories` |
+
+Override with `Meta.table_name`:
+
+```python
+class Post(Model):
+    class Meta:
+        table_name = "blog_posts"  # custom name
+```
+
+## Meta Options
+
+The inner `Meta` class configures model-level behavior:
+
+```python
+class Post(Model):
+    class Meta:
+        table_name      = "blog_posts"           # Custom table name
+        ordering        = ["-created_at"]         # Default ORDER BY
+        unique_together = [("author_id", "slug")] # Composite unique
+        index_together  = [("author_id", "created_at")]  # Composite index
+        indexes         = [                       # Individual indexes
+            Index(fields=["title"], name="post_title_idx"),
+        ]
+        constraints     = [                       # CHECK constraints
+            Constraint(check="views >= 0", name="chk_positive_views"),
+        ]
+```
+
+## The Primary Key
+
+Every model needs a primary key. If you don't define one, Ryx adds it automatically:
+
+```python
+# Implicit — added by the metaclass
+id = AutoField(primary_key=True)
+
+# Explicit — you define it
+class User(Model):
+    user_id = BigAutoField(primary_key=True)
+    email   = CharField(max_length=254, unique=True)
+```
+
+## Model Methods
+
+### `save()`
+
+```python
+post = Post(title="Hello", slug="hello")
+await post.save()  # INSERT
+
+post.title = "Updated"
+await post.save()  # UPDATE
+await post.save(update_fields=["title"])  # UPDATE only title
+```
+
+### `delete()`
+
+```python
+await post.delete()
+```
+
+### `refresh_from_db()`
+
+```python
+await post.refresh_from_db()              # Reload all fields
+await post.refresh_from_db(fields=["views"])  # Reload specific fields
+```
+
+### `full_clean()`
+
+Runs all field validators and calls `clean()`:
+
+```python
+try:
+    await post.full_clean()
+except ValidationError as e:
+    print(e.errors)  # → {"title": ["Ensure this value has at least 5 characters."]}
+```
+
+## Lifecycle Hooks
+
+Override these methods on your model to hook into lifecycle events:
+
+```python
+class Post(Model):
+    title = CharField(max_length=200)
+    slug  = CharField(max_length=210)
+
+    async def clean(self) -> None:
+        """Cross-field validation."""
+        if self.title and not self.slug:
+            raise ValidationError({"slug": ["Slug is required when title is set"]})
+
+    async def before_save(self, created: bool) -> None:
+        """Called before INSERT or UPDATE."""
+        if created:
+            print(f"Creating new post: {self.title}")
+
+    async def after_save(self, created: bool) -> None:
+        """Called after INSERT or UPDATE."""
+        if created:
+            await send_notification(f"New post: {self.title}")
+
+    async def before_delete(self) -> None:
+        """Called before DELETE."""
+        if self.title == "protected":
+            raise ValueError("Cannot delete this post")
+
+    async def after_delete(self) -> None:
+        """Called after DELETE."""
+        await cleanup_cache(self.pk)
+```
+
+:::tip
+`save()` calls `full_clean()` by default. Skip validation with `save(validate=False)` for bulk operations.
+:::
+
+## Model Exceptions
+
+Each model gets its own exception classes for precise error handling:
+
+```python
+try:
+    post = await Post.objects.get(pk=999)
+except Post.DoesNotExist:
+    print("Post not found")
+
+try:
+    post = await Post.objects.get(slug="duplicate")
+except Post.MultipleObjectsReturned:
+    print("Multiple posts match")
+```
+
+## Next Steps
+
+→ **[Managers & QuerySets](./managers-and-querysets)** — The query engine
+→ **[Fields](./fields)** — All 30+ field types

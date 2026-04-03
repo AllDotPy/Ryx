@@ -1,0 +1,165 @@
+---
+sidebar_position: 3
+---
+
+# Managers & QuerySets
+
+Every model has a `objects` attribute — this is the **Manager**. It's your entry point to the database.
+
+## The Manager
+
+```python
+Post.objects           # → Manager
+Post.objects.all()     # → QuerySet (all posts)
+Post.objects.filter(active=True)  # → QuerySet (filtered)
+```
+
+The Manager proxies most calls to a `QuerySet`, but also provides convenience methods:
+
+```python
+# Direct creation
+post = await Post.objects.create(title="Hello", slug="hello")
+
+# Get or create
+post, created = await Post.objects.get_or_create(
+    slug="hello",
+    defaults={"title": "Hello"},
+)
+
+# Update or create
+post, created = await Post.objects.update_or_create(
+    slug="hello",
+    defaults={"title": "Updated"},
+)
+
+# Bulk lookup
+posts = await Post.objects.in_bulk([1, 2, 3])
+# → {1: <Post pk=1>, 2: <Post pk=2>, 3: <Post pk=3>}
+```
+
+## The QuerySet
+
+A QuerySet is a **lazy, chainable** representation of a database query.
+
+### Lazy Evaluation
+
+```python
+# Nothing hits the database yet
+qs = Post.objects.filter(active=True).order_by("-views")
+
+# NOW the query executes
+posts = await qs
+```
+
+### Immutability
+
+Every QuerySet method returns a **new** QuerySet — the original is never modified:
+
+```python
+base = Post.objects.all()
+
+filtered = base.filter(active=True)   # base is unchanged
+ordered  = base.order_by("-views")     # base is still unsorted
+```
+
+### Chainable API
+
+```python
+posts = await (
+    Post.objects
+        .filter(active=True)
+        .exclude(title__startswith="Draft")
+        .order_by("-views", "title")
+        .limit(20)
+        .offset(40)
+        .distinct()
+)
+```
+
+## QuerySet Methods
+
+### Filtering
+
+```python
+Post.objects.filter(active=True)
+Post.objects.filter(views__gt=100)
+Post.objects.filter(title__contains="Python")
+Post.objects.exclude(status="draft")
+```
+
+### Retrieval
+
+```python
+post = await Post.objects.get(pk=1)       # Raises DoesNotExist or MultipleObjectsReturned
+post = await Post.objects.first()          # Returns None if empty
+post = await Post.objects.last()           # Returns None if empty
+```
+
+### Aggregation
+
+```python
+stats = await Post.objects.aggregate(
+    total=Count("id"),
+    avg=Avg("views"),
+)
+
+posts = await Post.objects.values("author_id").annotate(
+    count=Count("id"),
+    total=Sum("views"),
+)
+```
+
+### Slicing
+
+```python
+# First 10
+first_ten = await Post.objects.all()[:10]
+
+# Pagination
+page_two = await Post.objects.all()[10:20]
+
+# Single item by index
+third = await Post.objects.all()[2]
+```
+
+### Async Iteration
+
+```python
+async for post in Post.objects.filter(active=True):
+    print(post.title)
+```
+
+### Count & Exists
+
+```python
+count = await Post.objects.filter(active=True).count()
+exists = await Post.objects.filter(active=True).exists()
+```
+
+### Update & Delete
+
+```python
+# Bulk update
+updated = await Post.objects.filter(active=False).update(active=True)
+
+# Bulk delete
+deleted = await Post.objects.filter(views=0).delete()
+```
+
+## Sync/Aasync Bridge
+
+Use Ryx from synchronous code:
+
+```python
+from ryx import run_sync
+
+# Blocks until query completes
+posts = run_sync(Post.objects.filter(active=True))
+post = run_sync(Post.objects.get(pk=1))
+count = run_sync(Post.objects.count())
+```
+
+## Next Steps
+
+→ **[Filtering](/querying/filtering)** — Deep dive into lookups
+→ **[Q Objects](/querying/q-objects)** — OR, NOT, and complex expressions

@@ -1,0 +1,32 @@
+---
+sidebar_position: 1
+---
+
+# Core Concepts
+
+This section covers the fundamental building blocks of Ryx.
+
+## What You'll Learn
+
+- **[Models](./models)** — Define database tables as Python classes
+- **[Managers & QuerySets](./managers-and-querysets)** — The query API engine
+- **[Fields](./fields)** — 30+ column types with validation
+- **[Migrations](./migrations)** — Schema evolution, automated
+
+## The Big Picture
+
+```python
+# 1. Define a model (maps to a table)
+class Post(Model):
+    title = CharField(max_length=200)
+    views = IntField(default=0)
+
+# 2. Access via Manager
+Post.objects  # → Manager
+
+# 3. Build queries with QuerySet
+Post.objects.filter(active=True)  # → QuerySet (lazy)
+
+# 4. Execute
+await Post.objects.filter(active=True)  # → [Post, Post, ...]
+```

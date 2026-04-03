@@ -1,0 +1,176 @@
+---
+sidebar_position: 4
+---
+
+# Fields
+
+Fields define the columns of your database tables. Ryx provides 30+ field types with built-in validation and type conversion.
+
+## Common Field Options
+
+Every field accepts these common options:
+
+| Option | Type | Description |
+|---|---|---|
+| `null` | `bool` | Allow `NULL` in the database (default: `False`) |
+| `blank` | `bool` | Allow empty value in validation (default: `False`) |
+| `default` | `Any \| callable` | Default value or callable |
+| `unique` | `bool` | `UNIQUE` constraint |
+| `db_index` | `bool` | Create an index on this column |
+| `choices` | `list` | Restrict values to this list |
+| `validators` | `list` | Additional validators |
+| `editable` | `bool` | Include in `save()` (default: `True`) |
+| `help_text` | `str` | Documentation string |
+| `verbose_name` | `str` | Human-readable label |
+| `db_column` | `str` | Override column name |
+| `primary_key` | `bool` | Make this the primary key |
+
+```python
+CharField(
+    max_length=200,
+    null=True,
+    blank=True,
+    default="",
+    unique=False,
+    db_index=False,
+    choices=["draft", "published"],
+    validators=[MaxLengthValidator(200)],
+    db_column="post_title",
+)
+```
+
+## Integer Fields
+
+| Field | SQL Type | Python Type | Extra Options |
+|---|---|---|---|
+| `AutoField` | `SERIAL` | `int` | Auto-increment PK |
+| `BigAutoField` | `BIGSERIAL` | `int` | 64-bit auto-increment |
+| `SmallAutoField` | `SMALLSERIAL` | `int` | 16-bit auto-increment |
+| `IntField` | `INTEGER` | `int` | `min_value`, `max_value` |
+| `SmallIntField` | `SMALLINT` | `int` | `min_value`, `max_value` |
+| `BigIntField` | `BIGINT` | `int` | `min_value`, `max_value` |
+| `PositiveIntField` | `INTEGER` | `int` | Implicit `min_value=0` |
+
+```python
+class Product(Model):
+    stock    = IntField(default=0, min_value=0)
+    price_cents = PositiveIntField()
+    rating   = SmallIntField(min_value=1, max_value=5)
+```
+
+## Text Fields
+
+| Field | SQL Type | Python Type | Extra Options |
+|---|---|---|---|
+| `CharField` | `VARCHAR(n)` | `str` | `max_length`, `min_length`, `strip` |
+| `TextField` | `TEXT` | `str` | `min_length` |
+| `SlugField` | `VARCHAR(50)` | `str` | Auto slug validation |
+| `EmailField` | `VARCHAR(254)` | `str` | Auto email validation |
+| `URLField` | `VARCHAR(200)` | `str` | Auto URL validation |
+| `IPAddressField` | `VARCHAR(15)` | `str` | Auto IPv4 validation |
+
+```python
+class User(Model):
+    name     = CharField(max_length=100, min_length=2)
+    email    = EmailField(unique=True)
+    website  = URLField(null=True, blank=True)
+    bio      = TextField(null=True, blank=True)
+    slug     = SlugField(unique=True)
+```
+
+## Date & Time Fields
+
+| Field | SQL Type | Python Type | Extra Options |
+|---|---|---|---|
+| `DateField` | `DATE` | `date` | `auto_now`, `auto_now_add` |
+| `DateTimeField` | `TIMESTAMP` | `datetime` | `auto_now`, `auto_now_add` |
+| `TimeField` | `TIME` | `time` | — |
+| `DurationField` | `BIGINT` | `timedelta` | Stored as microseconds |
+
+```python
+class Event(Model):
+    date       = DateField()
+    starts_at  = DateTimeField()
+    ends_at    = DateTimeField(null=True)
+    duration   = DurationField(null=True)
+    created_at = DateTimeField(auto_now_add=True)
+    updated_at = DateTimeField(auto_now=True)
+```
+
+## Special Fields
+
+| Field | SQL Type | Python Type | Extra Options |
+|---|---|---|---|
+| `BooleanField` | `BOOLEAN` | `bool` | — |
+| `NullBooleanField` | `BOOLEAN` | `bool \| None` | Implicit `null=True` |
+| `FloatField` | `DOUBLE PRECISION` | `float` | `min_value`, `max_value` |
+| `DecimalField` | `NUMERIC(p,s)` | `Decimal` | `max_digits`, `decimal_places` |
+| `UUIDField` | `UUID` | `UUID` | `auto_create` |
+| `JSONField` | `JSONB` | `dict \| list` | — |
+| `BinaryField` | `BYTEA` | `bytes` | — |
+| `ArrayField` | `T[]` | `list` | `base_field` |
+
+```python
+from decimal import Decimal
+import uuid
+
+class Config(Model):
+    active     = BooleanField(default=True)
+    score      = FloatField(null=True)
+    price      = DecimalField(max_digits=10, decimal_places=2)
+    ref_id     = UUIDField(auto_create=True)
+    metadata   = JSONField(null=True)
+    tags       = ArrayField(base_field=CharField(max_length=50), null=True)
+    data       = BinaryField(null=True)
+```
+
+## Relationship Fields
+
+| Field | SQL Type | Description |
+|---|---|---|
+| `ForeignKey` | `INTEGER` | Many-to-one relationship |
+| `OneToOneField` | `INTEGER UNIQUE` | One-to-one relationship |
+| `ManyToManyField` | *(join table)* | Many-to-many relationship |
+
+```python
+class Author(Model):
+    name = CharField(max_length=100)
+
+class Post(Model):
+    title  = CharField(max_length=200)
+    author = ForeignKey(Author, on_delete="CASCADE", related_name="posts")
+
+class Tag(Model):
+    name  = CharField(max_length=50)
+    posts = ManyToManyField(Post, through="PostTag")
+```
+
+See [Relationships](/relationships/foreign-key) for full details.
+
+## Custom Fields
+
+Extend `Field` to create your own type:
+
+```python
+from ryx import Field
+
+class CurrencyField(Field):
+    """Stores currency codes (USD, EUR, etc.)."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("max_length", 3)
+        super().__init__(**kwargs)
+
+    def to_python(self, value):
+        if value is None:
+            return None
+        return str(value).upper()
+
+    def to_db(self, value):
+        return self.to_python(value)
+```
+
+## Next Steps
+
+→ **[Migrations](./migrations)** — Evolve your schema
+→ **[Filtering](/querying/filtering)** — Query your data

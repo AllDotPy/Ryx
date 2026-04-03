@@ -1,0 +1,110 @@
+---
+sidebar_position: 5
+---
+
+# Migrations
+
+Ryx can introspect your database, detect schema changes, and generate DDL automatically.
+
+## Two Approaches
+
+### Direct Migration (No Files)
+
+Best for prototyping and simple projects:
+
+```python
+from ryx.migrations import MigrationRunner
+
+await ryx.setup("sqlite:///app.db")
+runner = MigrationRunner([Author, Post, Tag])
+await runner.migrate()
+
+# Preview without applying
+await runner.migrate(dry_run=True)
+```
+
+### File-Based Migrations
+
+Best for production and team projects:
+
+```bash
+# Generate migration files
+python -m ryx makemigrations \
+    --models myapp.models \
+    --dir migrations/
+
+# Apply migrations
+python -m ryx migrate \
+    --url postgres://user:pass@localhost/mydb \
+    --models myapp.models
+
+# Preview SQL
+python -m ryx sqlmigrate 0001_initial --dir migrations/
+
+# Check status
+python -m ryx showmigrations \
+    --url postgres://user:pass@localhost/mydb \
+    --dir migrations/
+```
+
+## How It Works
+
+```
+1. Introspect live DB schema → SchemaState (current)
+2. Build target from Models → SchemaState (desired)
+3. Diff the two states      → List of changes
+4. Generate DDL             → CREATE TABLE, ALTER COLUMN, etc.
+5. Execute                  → Apply to database
+```
+
+## Migration Tracking
+
+Ryx creates a `ryx_migrations` table to track applied migrations:
+
+| Column | Type |
+|---|---|
+| `id` | INTEGER |
+| `name` | TEXT |
+| `applied_at` | TIMESTAMP |
+
+## What Migrations Handle
+
+- Creating and dropping tables
+- Adding, altering, and dropping columns
+- Creating and dropping indexes
+- Adding and dropping constraints
+- Creating ManyToMany join tables
+- Unique constraints and composite indexes
+
+## DDL Generation
+
+Generate backend-aware DDL programmatically:
+
+```python
+from ryx.migrations import generate_schema_ddl, DDLGenerator
+
+# All models at once
+stmts = generate_schema_ddl([Author, Post], backend="postgres")
+for sql in stmts:
+    print(sql)
+
+# Fine-grained control
+gen = DDLGenerator("sqlite")
+print(gen.create_table(Post._meta_to_table_state()))
+print(gen.add_column("posts", column_state))
+```
+
+## Backend Differences
+
+| Feature | PostgreSQL | MySQL | SQLite |
+|---|---|---|---|
+| `ALTER COLUMN` | Yes | Yes | No (recreate table) |
+| Native UUID | Yes | No | No |
+| `SERIAL` | Yes | No | No |
+| `JSONB` | Yes | No | No |
+| Array types | Yes | No | No |
+
+## Next Steps
+
+→ **[Filtering](/querying/filtering)** — Start querying your data
+→ **[CLI Reference](/advanced/cli)** — All migration commands
