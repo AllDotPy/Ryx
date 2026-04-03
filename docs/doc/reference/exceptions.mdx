@@ -1,0 +1,65 @@
+---
+sidebar_position: 5
+---
+
+# Exceptions
+
+Ryx's exception hierarchy mirrors Django's for familiarity.
+
+## Hierarchy
+
+```
+RyxError
+├── DatabaseError           # SQL / driver errors
+├── PoolNotInitialized      # ryx.setup() not called
+├── DoesNotExist            # .get() found 0 rows
+├── MultipleObjectsReturned # .get() found >1 rows
+├── FieldError              # Unknown field in query
+└── ValidationError         # Field / model validation failure
+    .errors: dict[str, list[str]]
+```
+
+## Model-Specific Exceptions
+
+Each model gets its own `DoesNotExist` and `MultipleObjectsReturned`:
+
+```python
+try:
+    post = await Post.objects.get(pk=999)
+except Post.DoesNotExist:
+    print("Post not found")
+
+try:
+    post = await Post.objects.get(slug="duplicate")
+except Post.MultipleObjectsReturned:
+    print("Multiple posts match")
+```
+
+## ValidationError
+
+```python
+from ryx import ValidationError
+
+try:
+    await product.full_clean()
+except ValidationError as e:
+    print(e.errors)
+    # → {
+    #     "name": ["Ensure this value has at least 3 characters."],
+    #     "price": ["Ensure this value is greater than or equal to 0."],
+    #   }
+
+    # Merge with another ValidationError
+    merged = e.merge(other_error)
+```
+
+## Catching Database Errors
+
+```python
+from ryx import DatabaseError
+
+try:
+    await raw_execute("INVALID SQL")
+except DatabaseError as e:
+    print(f"Database error: {e}")
+```

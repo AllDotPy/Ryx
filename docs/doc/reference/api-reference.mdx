@@ -1,0 +1,238 @@
+---
+sidebar_position: 2
+---
+
+# API Reference
+
+Complete public API surface of Ryx.
+
+## Setup & Connection
+
+```python
+import ryx
+
+await ryx.setup(url, max_connections=10, min_connections=1, connect_timeout=30, idle_timeout=600, max_lifetime=1800)
+ryx.is_connected()           # → bool
+ryx.pool_stats()             # → dict with pool statistics
+```
+
+## Models
+
+```python
+from ryx import Model, Index, Constraint
+
+class MyModel(Model):
+    class Meta:
+        table_name = "custom_name"
+        ordering = ["-created_at"]
+        unique_together = [("field1", "field2")]
+        indexes = [Index(fields=["field"], name="idx")]
+        constraints = [Constraint(check="col > 0", name="chk")]
+```
+
+## Fields
+
+```python
+from ryx import (
+    AutoField, BigAutoField, SmallAutoField,
+    IntField, SmallIntField, BigIntField, PositiveIntField,
+    FloatField, DecimalField,
+    BooleanField, NullBooleanField,
+    CharField, TextField, SlugField, EmailField, URLField, IPAddressField,
+    DateField, DateTimeField, TimeField, DurationField,
+    UUIDField, JSONField, BinaryField, ArrayField,
+    ForeignKey, OneToOneField, ManyToManyField,
+)
+```
+
+## QuerySet
+
+```python
+qs.filter(**kwargs)
+qs.exclude(**kwargs)
+qs.all()
+qs.get(**kwargs)
+qs.first()
+qs.last()
+qs.exists()
+qs.count()
+qs.order_by(*fields)
+qs.limit(n)
+qs.offset(n)
+qs.distinct()
+qs.values(*fields)
+qs.annotate(**kwargs)
+qs.aggregate(**kwargs)
+qs.join(table, condition, alias=None, kind="INNER")
+qs.update(**kwargs)
+qs.delete()
+qs.cache()
+qs.stream(page_size=500)
+qs.using(db_alias)
+qs.in_bulk(id_list)
+```
+
+## Q Objects
+
+```python
+from ryx import Q
+
+Q(field=value)
+Q(field__lookup=value)
+Q(a=True) | Q(b=True)    # OR
+Q(a=True) & Q(b=True)    # AND
+~Q(a=True)               # NOT
+```
+
+## Aggregates
+
+```python
+from ryx import Count, Sum, Avg, Min, Max, RawAgg
+
+Count("field", distinct=True)
+Sum("field")
+Avg("field")
+Min("field")
+Max("field")
+RawAgg("SQL expression")
+```
+
+## Transactions
+
+```python
+import ryx
+
+async with ryx.transaction() as tx:
+    tx.savepoint("name")
+    tx.rollback_to("name")
+    tx.release_savepoint("name")
+
+ryx.get_active_transaction()  # → TransactionHandle | None
+```
+
+## Signals
+
+```python
+from ryx import (
+    Signal, receiver,
+    pre_save, post_save,
+    pre_delete, post_delete,
+    pre_update, post_update,
+    pre_bulk_delete, post_bulk_delete,
+)
+
+signal.connect(handler, sender=None, weak=True)
+signal.disconnect(handler, sender=None)
+await signal.send(sender, **kwargs)
+
+@receiver(signal, sender=Model)
+async def handler(sender, **kwargs): ...
+```
+
+## Validation
+
+```python
+from ryx import ValidationError
+from ryx.validators import (
+    MaxLengthValidator, MinLengthValidator,
+    MaxValueValidator, MinValueValidator,
+    RangeValidator, RegexValidator,
+    EmailValidator, URLValidator,
+    NotBlankValidator, ChoicesValidator,
+    FunctionValidator, NotNullValidator,
+    UniqueValueValidator,
+    run_full_validation,
+)
+```
+
+## Bulk Operations
+
+```python
+from ryx.bulk import bulk_create, bulk_update, bulk_delete, stream
+
+await bulk_create(instances, batch_size=100)
+await bulk_update(instances, fields=["field"])
+await bulk_delete(queryset)
+async for batch in stream(queryset, page_size=500): ...
+```
+
+## Relations
+
+```python
+from ryx.relations import apply_select_related, apply_prefetch_related
+
+await apply_select_related(queryset, fields=["author"])
+await apply_prefetch_related(queryset, fields=["tags"])
+```
+
+## Caching
+
+```python
+from ryx import configure_cache, get_cache
+
+configure_cache(ttl=300, max_size=1000)
+cache = get_cache()
+```
+
+## Custom Lookups
+
+```python
+import ryx
+
+ryx.register_lookup("name", "{col} OPERATOR ?")
+ryx.available_lookups()  # → list[str]
+
+@ryx.lookup("name")
+def my_lookup(field, value):
+    """{col} OPERATOR ?"""
+```
+
+## Sync/Async
+
+```python
+from ryx import run_sync, sync_to_async, async_to_sync, run_async
+
+run_sync(awaitable)
+sync_to_async(func)
+async_to_async(func)
+async_to_sync(awaitable)
+await run_async(func, *args)
+```
+
+## Raw SQL
+
+```python
+from ryx.executor_helpers import raw_fetch, raw_execute
+from ryx.pool_ext import fetch_with_params, execute_with_params
+
+await raw_fetch("SELECT ...", [params])
+await raw_execute("CREATE ...")
+await fetch_with_params("SELECT ... WHERE x = ?", [value])
+await execute_with_params("INSERT ...", [values])
+```
+
+## Migrations
+
+```python
+from ryx.migrations import MigrationRunner, DDLGenerator, generate_schema_ddl
+
+runner = MigrationRunner([Model1, Model2])
+await runner.migrate()
+await runner.migrate(dry_run=True)
+
+stmts = generate_schema_ddl([Model1], backend="postgres")
+```
+
+## CLI
+
+```bash
+python -m ryx migrate --url ... --models ...
+python -m ryx makemigrations --models ... --dir ...
+python -m ryx showmigrations --url ... --dir ...
+python -m ryx sqlmigrate <name> --dir ...
+python -m ryx flush --models ... --url ... --yes
+python -m ryx shell --url ... --models ...
+python -m ryx dbshell --url ...
+python -m ryx inspectdb --url ... [--table ...]
+python -m ryx version
+```

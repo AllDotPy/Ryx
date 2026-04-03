@@ -1,0 +1,81 @@
+---
+sidebar_position: 3
+---
+
+# Field Reference
+
+Complete reference of all field types, their SQL types, and Python types.
+
+## Integer Fields
+
+| Field | SQL Type | Python Type | Extra Kwargs |
+|---|---|---|---|
+| `AutoField` | `SERIAL` | `int` | — |
+| `BigAutoField` | `BIGSERIAL` | `int` | — |
+| `SmallAutoField` | `SMALLSERIAL` | `int` | — |
+| `IntField` | `INTEGER` | `int` | `min_value`, `max_value` |
+| `SmallIntField` | `SMALLINT` | `int` | `min_value`, `max_value` |
+| `BigIntField` | `BIGINT` | `int` | `min_value`, `max_value` |
+| `PositiveIntField` | `INTEGER` | `int` | implicit `min_value=0` |
+
+## Text Fields
+
+| Field | SQL Type | Python Type | Extra Kwargs |
+|---|---|---|---|
+| `CharField` | `VARCHAR(n)` | `str` | `max_length`, `min_length`, `strip` |
+| `TextField` | `TEXT` | `str` | `min_length` |
+| `EmailField` | `VARCHAR(254)` | `str` | auto email validation |
+| `SlugField` | `VARCHAR(50)` | `str` | auto slug validation |
+| `URLField` | `VARCHAR(200)` | `str` | auto URL validation |
+| `IPAddressField` | `VARCHAR(15)` | `str` | auto IPv4 validation |
+
+## Date & Time Fields
+
+| Field | SQL Type | Python Type | Extra Kwargs |
+|---|---|---|---|
+| `DateField` | `DATE` | `date` | `auto_now`, `auto_now_add` |
+| `DateTimeField` | `TIMESTAMP` | `datetime` | `auto_now`, `auto_now_add` |
+| `TimeField` | `TIME` | `time` | — |
+| `DurationField` | `BIGINT` | `timedelta` | stored as microseconds |
+
+## Special Fields
+
+| Field | SQL Type | Python Type | Extra Kwargs |
+|---|---|---|---|
+| `BooleanField` | `BOOLEAN` | `bool` | — |
+| `NullBooleanField` | `BOOLEAN` | `bool \| None` | implicit `null=True` |
+| `FloatField` | `DOUBLE PRECISION` | `float` | `min_value`, `max_value` |
+| `DecimalField` | `NUMERIC(p,s)` | `Decimal` | `max_digits`, `decimal_places` |
+| `UUIDField` | `UUID` | `UUID` | `auto_create` |
+| `JSONField` | `JSONB` | `dict \| list` | — |
+| `BinaryField` | `BYTEA` | `bytes` | — |
+| `ArrayField` | `T[]` | `list` | `base_field` |
+
+## Relationship Fields
+
+| Field | SQL Type | Python Type | Extra Kwargs |
+|---|---|---|---|
+| `ForeignKey` | `INTEGER` | `int` | `on_delete`, `related_name` |
+| `OneToOneField` | `INTEGER UNIQUE` | `int` | same as FK |
+| `ManyToManyField` | *(join table)* | — | `through` |
+
+## Common Field Options
+
+```python
+CharField(
+    max_length=200,       # Required for CharField
+    min_length=5,         # Optional minimum
+    null=True,            # Allow NULL in DB
+    blank=True,           # Allow empty in validation
+    default="",           # Default value or callable
+    unique=True,          # UNIQUE constraint
+    db_index=True,        # CREATE INDEX
+    choices=["a", "b"],   # Restrict values
+    validators=[...],     # Extra validators
+    editable=True,        # Include in save()
+    help_text="...",      # Documentation
+    verbose_name="...",   # Human-readable label
+    db_column="col",      # Override column name
+    primary_key=False,    # Make this the PK
+)
+```
