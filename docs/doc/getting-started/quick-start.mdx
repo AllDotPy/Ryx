@@ -1,0 +1,170 @@
+---
+sidebar_position: 3
+---
+
+# Quick Start
+
+Let's go from zero to a working database query in 5 minutes.
+
+## Step 1: Connect to a Database
+
+```python
+import asyncio
+import ryx
+
+async def main():
+    # SQLite for quick testing
+    await ryx.setup("sqlite:///app.db")
+
+    # Or PostgreSQL for production
+    # await ryx.setup("postgres://user:pass@localhost/mydb")
+
+asyncio.run(main())
+```
+
+:::tip
+Use `sqlite::memory:` for tests — no files, no cleanup needed.
+:::
+
+## Step 2: Define a Model
+
+```python
+from ryx import Model, CharField, IntField, BooleanField, DateTimeField
+
+class Post(Model):
+    title    = CharField(max_length=200)
+    slug     = CharField(max_length=210, unique=True)
+    views    = IntField(default=0)
+    active   = BooleanField(default=True)
+    created  = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+```
+
+That's it. No migrations file to write — Ryx handles it.
+
+## Step 3: Run Migrations
+
+```python
+from ryx.migrations import MigrationRunner
+
+async def main():
+    await ryx.setup("sqlite:///app.db")
+    runner = MigrationRunner([Post])
+    await runner.migrate()  # Creates the table
+
+asyncio.run(main())
+```
+
+Or via CLI:
+
+```bash
+python -m ryx migrate --url sqlite:///app.db --models myapp.models
+```
+
+## Step 4: Create Records
+
+```python
+post = await Post.objects.create(
+    title="Hello Ryx",
+    slug="hello-ryx",
+    views=42,
+)
+print(f"Created post #{post.pk}")
+```
+
+## Step 5: Query
+
+```python
+# Simple filter
+active_posts = await Post.objects.filter(active=True)
+
+# With Q objects
+popular = await Post.objects.filter(
+    Q(active=True) | Q(views__gte=1000)
+)
+
+# Chain it all
+top_posts = await (
+    Post.objects
+        .filter(active=True)
+        .exclude(title__startswith="Draft")
+        .order_by("-views")
+        .limit(10)
+)
+
+# Aggregations
+stats = await Post.objects.aggregate(
+    total_posts=Count("id"),
+    total_views=Sum("views"),
+    avg_views=Avg("views"),
+)
+print(stats)
+# → {'total_posts': 42, 'total_views': 15000, 'avg_views': 357.14}
+```
+
+## Step 6: Update & Delete
+
+```python
+# Update
+post.title = "Updated Title"
+await post.save()
+
+# Or bulk update
+updated = await Post.objects.filter(active=False).update(active=True)
+
+# Delete
+await post.delete()
+
+# Or bulk delete
+deleted = await Post.objects.filter(views=0).delete()
+```
+
+## Complete Example
+
+```python
+import asyncio
+import ryx
+from ryx import Model, CharField, IntField, BooleanField, DateTimeField, Q, Count, Sum, Avg
+from ryx.migrations import MigrationRunner
+
+class Post(Model):
+    title  = CharField(max_length=200)
+    slug   = CharField(max_length=210, unique=True)
+    views  = IntField(default=0)
+    active = BooleanField(default=True)
+    created = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created"]
+
+async def main():
+    # 1. Connect
+    await ryx.setup("sqlite::memory:")
+
+    # 2. Migrate
+    await MigrationRunner([Post]).migrate()
+
+    # 3. Create
+    await Post.objects.create(title="Hello Ryx", slug="hello-ryx", views=100)
+    await Post.objects.create(title="Rust is fast", slug="rust-fast", views=500)
+    await Post.objects.create(title="Draft post", slug="draft", views=0, active=False)
+
+    # 4. Query
+    posts = await Post.objects.filter(active=True).order_by("-views")
+    print(f"Found {len(posts)} active posts")
+
+    # 5. Aggregate
+    stats = await Post.objects.aggregate(
+        total=Count("id"), avg=Avg("views"), top=Max("views"),
+    )
+    print(f"Stats: {stats}")
+
+asyncio.run(main())
+```
+
+## Next Steps
+
+→ **[Project Structure](./project-structure)** — Understand how Ryx is organized
+→ **[Models](/core-concepts/models)** — Deep dive into model definitions

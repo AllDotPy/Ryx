@@ -1,0 +1,116 @@
+---
+sidebar_position: 2
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+# Installation
+
+## Prerequisites
+
+| Requirement | Version | Why |
+|---|---|---|
+| **Rust** | 1.83+ | Compiles the core engine |
+| **Python** | 3.10+ | Runtime for the ORM layer |
+| **maturin** | latest | Builds Rust into a Python extension |
+
+### Install Rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup update stable
+```
+
+### Install maturin
+
+```bash
+pip install maturin
+```
+
+## Install Ryx
+
+### For Users (Quick Install)
+
+<Tabs>
+  <TabItem value="uv-add" label="uv add" default>
+
+```bash
+uv add ryx
+```
+
+  </TabItem>
+  <TabItem value="uv-pip" label="uv pip">
+
+```bash
+uv pip install ryx
+```
+
+  </TabItem>
+  <TabItem value="pip" label="pip">
+
+```bash
+pip install ryx
+```
+
+  </TabItem>
+</Tabs>
+
+:::tip
+Ryx requires Rust to be installed on your system even for pip installs, as it ships a pre-compiled binary. If no binary is available for your platform, maturin will compile from source.
+:::
+
+### From Source (Recommended for Development)
+
+```bash
+git clone https://github.com/AllDotPy/Ryx
+cd Ryx
+maturin develop
+```
+
+### With Database Features (Source)
+
+Ryx supports three database backends. Enable them as Cargo features:
+
+<Tabs>
+  <TabItem value="postgres" label="PostgreSQL" default>
+
+```bash
+maturin develop --features postgres
+```
+
+  </TabItem>
+  <TabItem value="mysql" label="MySQL">
+
+```bash
+maturin develop --features mysql
+```
+
+  </TabItem>
+  <TabItem value="sqlite" label="SQLite">
+
+```bash
+maturin develop --features sqlite
+```
+
+  </TabItem>
+  <TabItem value="all" label="All Backends">
+
+```bash
+maturin develop --features postgres,mysql,sqlite
+```
+
+  </TabItem>
+</Tabs>
+
+## Verify Installation
+
+```python
+python -c "import ryx; print(ryx.__version__)"
+```
+
+You should see `0.1.0` printed.
+
+## Next Steps
+
+→ **[Quick Start](./quick-start)** — Write your first queries in 5 minutes

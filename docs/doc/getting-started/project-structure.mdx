@@ -1,0 +1,106 @@
+---
+sidebar_position: 4
+---
+
+# Project Structure
+
+Understanding how Ryx is organized will help you navigate the codebase and contribute effectively.
+
+## High-Level Layout
+
+```
+Ryx/
+├── Cargo.toml                  # Rust dependencies
+├── pyproject.toml              # maturin build config
+├── Makefile                    # Dev shortcuts (dev, build, test, clean)
+│
+├── src/                        # RUST CORE (→ ryx_core.so)
+│   ├── lib.rs                  # PyO3 module entry, QueryBuilder
+│   ├── errors.rs               # RyxError + PyErr conversion
+│   ├── pool.rs                 # Global sqlx AnyPool singleton
+│   ├── executor.rs             # SELECT/INSERT/UPDATE/DELETE
+│   ├── transaction.rs          # Transaction handle + savepoints
+│   └── query/
+│       ├── ast.rs              # QueryNode, QNode, Aggregates, Joins
+│       ├── compiler.rs         # AST → SQL + bound values
+│       └── lookup.rs           # Built-in + custom lookups
+│
+├── ryx/                        # PYTHON PACKAGE
+│   ├── __init__.py             # Public API surface
+│   ├── __main__.py             # CLI (python -m ryx)
+│   ├── models.py               # Model, Metaclass, Manager
+│   ├── queryset.py             # QuerySet, Q, aggregates
+│   ├── fields.py               # 30+ field types
+│   ├── validators.py           # 12 validators
+│   ├── signals.py              # Signal system + 8 built-in signals
+│   ├── transaction.py          # Async transaction context manager
+│   ├── relations.py            # select_related / prefetch_related
+│   ├── descriptors.py          # FK/M2M attribute access
+│   ├── exceptions.py           # Exception hierarchy
+│   ├── bulk.py                 # Bulk operations
+│   ├── cache.py                # Pluggable query cache
+│   └── migrations/
+│       ├── state.py            # SchemaState + diff engine
+│       ├── ddl.py              # Backend-aware DDL generator
+│       ├── runner.py           # MigrationRunner
+│       └── autodetect.py       # Autodetector + file writer
+│
+├── tests/                      # Test suites
+└── examples/                   # 9 progressive examples
+```
+
+## Two Layers, One Package
+
+Ryx is split into two layers that work together:
+
+### Rust Core (`src/`)
+
+The compiled engine that handles:
+- **Connection pooling** — Global `AnyPool` with configurable limits
+- **Query compilation** — AST → SQL string + bound parameters
+- **Query execution** — Async SQL via sqlx
+- **Type conversion** — Python ↔ SQL value bridges
+- **Transaction management** — BEGIN/COMMIT/ROLLBACK/SAVEPOINT
+
+### Python Package (`ryx/`)
+
+The ergonomic API that handles:
+- **Model definitions** — Declarative class-based models with metaclass magic
+- **Query building** — Chainable, lazy QuerySet API
+- **Field types** — 30+ fields with validation and type conversion
+- **Migrations** — Schema introspection, diff detection, DDL generation
+- **Signals** — Observer pattern for lifecycle events
+- **CLI** — Management commands for migrations, shell, etc.
+
+## How They Connect
+
+```python
+# Python side
+posts = await Post.objects.filter(active=True).limit(10)
+    │
+    ▼
+# QuerySet builds a QueryNode (Python → Rust via PyO3)
+    │
+    ▼
+# Rust compiles QueryNode → SQL
+# SELECT * FROM "posts" WHERE "active" = ? LIMIT 10
+    │
+    ▼
+# Rust executes via sqlx and returns rows
+    │
+    ▼
+# Python decodes rows into Model instances
+```
+
+## Key Design Principles
+
+1. **Immutable builders** — Every QuerySet method returns a new QuerySet
+2. **GIL minimization** — Rust holds no GIL during SQL execution
+3. **Async-native** — Everything is async from the ground up
+4. **Sync-compatible** — Bridge helpers for sync environments
+5. **Backend-agnostic** — Single code path for PG, MySQL, SQLite
+
+## Next Steps
+
+→ **[Models](/core-concepts/models)** — Define your first models
+→ **[Rust Core Internals](/internals/rust-core)** — Deep dive into the compiled engine
