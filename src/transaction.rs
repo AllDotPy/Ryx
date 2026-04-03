@@ -26,7 +26,8 @@
 //       await tx.rollback_to("sp1")
 // ###
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
+use once_cell::sync::OnceCell;
 use tokio::sync::Mutex;
 
 use sqlx::{Any, Transaction};
@@ -36,6 +37,19 @@ use crate::errors::{RyxError, RyxResult};
 use crate::pool;
 use crate::query::compiler::CompiledQuery;
 use crate::query::ast::SqlValue;
+
+static ACTIVE_TX: OnceCell<StdMutex<Option<Arc<Mutex<Option<TransactionHandle>>>>>> = OnceCell::new();
+
+pub fn set_current_transaction(tx: Option<Arc<Mutex<Option<TransactionHandle>>>>) {
+    let lock = ACTIVE_TX.get_or_init(|| StdMutex::new(None));
+    let mut guard = lock.lock().unwrap();
+    *guard = tx;
+}
+
+pub fn get_current_transaction() -> Option<Arc<Mutex<Option<TransactionHandle>>>> {
+    let lock = ACTIVE_TX.get_or_init(|| StdMutex::new(None));
+    lock.lock().unwrap().clone()
+}
 
 // ###
 // TransactionHandle — owns a live sqlx Transaction

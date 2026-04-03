@@ -1,8 +1,7 @@
-//
 // ###
 // Ryx — Query Executor
 // ###
-//
+
 // The executor is the bridge between our compiled SQL string and the live
 // database. It:
 //   1. Retrieves the global connection pool
@@ -10,33 +9,34 @@
 //   3. Executes the query via sqlx's async API
 //   4. Decodes each result row into a `HashMap<String, serde_json::Value>`
 //      which is then converted to a Python dict on the PyO3 boundary
-//
+
 // # Why HashMap<String, serde_json::Value> as the row type? 
-//
+
 // We need to pass row data back to Python as a dict. Using `serde_json::Value`
 // as the intermediate representation lets us:
 //   - Handle any SQL type (TEXT, INTEGER, FLOAT, BOOLEAN, NULL, JSON)
 //   - Serialize/deserialize via serde without manual match arms per-column
 //   - Convert to PyDict cleanly in the PyO3 layer
-//
+
 // The alternative — using PyDict directly in the Rust executor — would require
 // holding the GIL for the entire query execution, which would block Python's
 // event loop. By decoding to a Rust data structure first and converting only
 // at the end, we minimize GIL hold time.
-//
+
 // # Value binding strategy 
-//
+
 // sqlx's `AnyPool` requires values to be bound with `.bind()` and each value
 // must implement `sqlx::Encode<sqlx::Any>`. Our `SqlValue` enum covers the
 // full set of types we support, so we match on it and call `.bind()` for each
 // variant.
-//
+
 // # Transaction support 
-//
+
 // The executor works against any `sqlx::Executor` — either the pool directly
 // or a `Transaction`. This lets us share execution logic between the regular
 // path and the transactional path without code duplication.
 // ###
+
 
 use std::collections::HashMap;
 
@@ -53,6 +53,7 @@ use crate::query::{
     ast::SqlValue,
     compiler::CompiledQuery,
 };
+use crate::transaction;
 
 // ###
 // Result types
@@ -86,6 +87,14 @@ pub struct MutationResult {
 /// - [`RyxError::Database`] for SQL errors, connection failures, etc.
 #[instrument(skip(query), fields(sql = %query.sql))]
 pub async fn fetch_all(query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
+    if let Some(tx) = transaction::get_current_transaction() {
+        let tx_guard = tx.lock().await;
+        if let Some(active_tx) = tx_guard.as_ref() {
+            return active_tx.fetch_query(query).await;
+        }
+        return Err(RyxError::Internal("Transaction is no longer active".into()));
+    }
+
     let pool = pool::get()?;
 
     debug!(sql = %query.sql, "Executing SELECT");
@@ -112,6 +121,27 @@ pub async fn fetch_all(query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
 /// Same as [`fetch_all`].
 #[instrument(skip(query), fields(sql = %query.sql))]
 pub async fn fetch_count(query: CompiledQuery) -> RyxResult<i64> {
+    if let Some(tx) = transaction::get_current_transaction() {
+        let tx_guard = tx.lock().await;
+        if let Some(active_tx) = tx_guard.as_ref() {
+            let rows = active_tx.fetch_query(query).await?;
+            if rows.is_empty() {
+                return Ok(0);
+            }
+            // COUNT() returns a single column whose name may vary by backend.
+            if let Some(value) = rows[0].values().next() {
+                if let Some(i) = value.as_i64() {
+                    return Ok(i);
+                }
+                if let Some(f) = value.as_f64() {
+                    return Ok(f as i64);
+                }
+            }
+            return Err(RyxError::Internal("COUNT() returned unexpected value".into()));
+        }
+        return Err(RyxError::Internal("Transaction is no longer active".into()));
+    }
+
     let pool = pool::get()?;
 
     debug!(sql = %query.sql, "Executing COUNT");
@@ -146,36 +176,96 @@ pub async fn fetch_one(query: CompiledQuery) -> RyxResult<DecodedRow> {
     // We intentionally fetch up to 2 rows to detect MultipleObjectsReturned
     // without fetching the entire result set. This is more efficient than
     // `fetch_all` when the user calls `.get()` on a large table.
-    let pool = pool::get()?;
+    if let Some(tx) = transaction::get_current_transaction() {
+        let tx_guard = tx.lock().await;
+        if let Some(active_tx) = tx_guard.as_ref() {
+            let rows = active_tx.fetch_query(query).await?;
+            match rows.len() {
+                0 => Err(RyxError::DoesNotExist),
+                1 => Ok(rows.into_iter().next().unwrap()),
+                _ => Err(RyxError::MultipleObjectsReturned),
+            }
+        } else {
+            Err(RyxError::Internal("Transaction is no longer active".into()))
+        }
+    } else {
+        let pool = pool::get()?;
 
-    let mut q = sqlx::query(&query.sql);
-    q = bind_values(q, &query.values);
+        let mut q = sqlx::query(&query.sql);
+        q = bind_values(q, &query.values);
 
-    // Limit to 2 at the executor level (the QueryNode may already have
-    // LIMIT 1 set by `.first()`, but for `.get()` it doesn't).
-    // We check the count in Rust rather than adding SQL complexity.
-    let rows = q
-        .fetch_all(pool)
-        .await
-        .map_err(RyxError::Database)?;
+        // Limit to 2 at the executor level (the QueryNode may already have
+        // LIMIT 1 set by `.first()`, but for `.get()` it doesn't).
+        // We check the count in Rust rather than adding SQL complexity.
+        let rows = q
+            .fetch_all(pool)
+            .await
+            .map_err(RyxError::Database)?;
 
-    match rows.len() {
-        0 => Err(RyxError::DoesNotExist),
-        1 => Ok(decode_row(&rows[0])),
-        _ => Err(RyxError::MultipleObjectsReturned),
+        match rows.len() {
+            0 => Err(RyxError::DoesNotExist),
+            1 => Ok(decode_row(&rows[0])),
+            _ => Err(RyxError::MultipleObjectsReturned),
+        }
     }
 }
 
 /// Execute an INSERT, UPDATE, or DELETE query.
+///
+/// For INSERT queries with `RETURNING` clause, this fetches the returned
+/// value and populates `last_insert_id`.
 ///
 /// # Errors
 /// - [`RyxError::PoolNotInitialized`]
 /// - [`RyxError::Database`]
 #[instrument(skip(query), fields(sql = %query.sql))]
 pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
+    if let Some(tx) = transaction::get_current_transaction() {
+        let tx_guard = tx.lock().await;
+        if let Some(active_tx) = tx_guard.as_ref() {
+            // Check if this is a RETURNING query
+            if query.sql.to_uppercase().contains("RETURNING") {
+                let rows = active_tx.fetch_query(query).await?;
+                let last_insert_id = rows.first().and_then(|row| {
+                    row.values().next().and_then(|v| v.as_i64())
+                });
+                return Ok(MutationResult {
+                    rows_affected: 1,
+                    last_insert_id,
+                });
+            }
+            let rows_affected = active_tx.execute_query(query).await?;
+            return Ok(MutationResult {
+                rows_affected,
+                last_insert_id: None,
+            });
+        }
+        return Err(RyxError::Internal("Transaction is no longer active".into()));
+    }
+
     let pool = pool::get()?;
 
     debug!(sql = %query.sql, "Executing mutation");
+
+    // Check if this is a RETURNING query (e.g. INSERT ... RETURNING id)
+    if query.sql.to_uppercase().contains("RETURNING") {
+        let mut q = sqlx::query(&query.sql);
+        q = bind_values(q, &query.values);
+
+        let rows = q
+            .fetch_all(pool)
+            .await
+            .map_err(RyxError::Database)?;
+
+        let last_insert_id = rows.first().and_then(|row| {
+            row.try_get::<i64, _>(0).ok()
+        });
+
+        return Ok(MutationResult {
+            rows_affected: rows.len() as u64,
+            last_insert_id,
+        });
+    }
 
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
@@ -187,9 +277,6 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
 
     Ok(MutationResult {
         rows_affected: result.rows_affected(),
-        // AnyPool doesn't expose last_insert_id uniformly.
-        // For databases that support RETURNING (Postgres), the caller uses
-        // fetch_one() instead of execute() to retrieve the ID.
         last_insert_id: None,
     })
 }
@@ -245,17 +332,27 @@ fn decode_row(row: &AnyRow) -> DecodedRow {
         let name = column.name().to_string();
 
         // Try to extract values in type priority order.
-        // We try bool before i64 because on some databases a BOOLEAN column
-        // returns as i64 (0/1) via `try_get::<i64>()`. By checking bool
-        // first we preserve the semantic type.
+        // On SQLite, booleans are stored as INTEGER (0/1), so we try i64 first
+        // and then check if the value looks like a bool.
+        // On Postgres/MySQL, bool columns decode as bool natively.
         //
         // null: sqlx signals NULL by returning an Err on every typed get.
         // We detect this by trying Option<String> last.
 
-        let value: JsonValue = if let Ok(b) = row.try_get::<bool, _>(column.ordinal()) {
+        let value: JsonValue = if let Ok(i) = row.try_get::<i64, _>(column.ordinal()) {
+            // Check if this column name suggests a boolean
+            let col_lower = name.to_lowercase();
+            let looks_bool = col_lower.starts_with("is_")
+                || col_lower.starts_with("has_")
+                || col_lower.starts_with("can_")
+                || col_lower.ends_with("_flag");
+            if looks_bool && (i == 0 || i == 1) {
+                JsonValue::Bool(i != 0)
+            } else {
+                JsonValue::Number(i.into())
+            }
+        } else if let Ok(b) = row.try_get::<bool, _>(column.ordinal()) {
             JsonValue::Bool(b)
-        } else if let Ok(i) = row.try_get::<i64, _>(column.ordinal()) {
-            JsonValue::Number(i.into())
         } else if let Ok(f) = row.try_get::<f64, _>(column.ordinal()) {
             serde_json::Number::from_f64(f)
                 .map(JsonValue::Number)
