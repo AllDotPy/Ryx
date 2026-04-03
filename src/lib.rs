@@ -22,20 +22,6 @@ use crate::query::compiler;
 use crate::query::lookup;
 use crate::transaction::TransactionHandle;
 
-// ###
-// Tokio runtime singleton
-// ###
-
-// fn get_or_init_runtime() -> &'static tokio::runtime::Runtime {
-//     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
-//     RT.get_or_init(|| {
-//         tokio::runtime::Builder::new_multi_thread()
-//             .worker_threads(4)
-//             .enable_all()
-//             .build()
-//             .expect("Failed to build Tokio runtime")
-//     })
-// }
 
 // ###
 // Setup / pool functions
@@ -47,8 +33,8 @@ use crate::transaction::TransactionHandle;
     max_connections = 10,
     min_connections = 1,
     connect_timeout = 30,
-    idle_timeout    = 600,
-    max_lifetime    = 1800,
+    idle_timeout = 600,
+    max_lifetime = 1800,
 ))]
 fn setup<'py>(
     py: Python<'py>,
@@ -56,8 +42,8 @@ fn setup<'py>(
     max_connections: u32,
     min_connections: u32,
     connect_timeout: u64,
-    idle_timeout:    u64,
-    max_lifetime:    u64,
+    idle_timeout: u64,
+    max_lifetime: u64,
 ) -> PyResult<Bound<'py, PyAny>> {
     let config = PoolConfig {
         max_connections,
@@ -176,10 +162,10 @@ impl PyQueryBuilder {
 
     fn add_join(
         &self,
-        kind:     String,
-        table:    String,
-        alias:    String,
-        on_left:  String,
+        kind: String,
+        table: String,
+        alias: String,
+        on_left: String,
         on_right: String,
     ) -> PyQueryBuilder {
         let join_kind = match kind.as_str() {
@@ -443,7 +429,7 @@ fn json_to_py<'py>(py: Python<'py>, v: &JsonValue) -> PyResult<Py<PyAny>> {
 
 #[pyclass(name = "TransactionHandle")]
 pub struct PyTransactionHandle {
-    handle: Arc<TokioMutex<Option<TransactionHandle>>>,
+    pub handle: Arc<TokioMutex<Option<TransactionHandle>>>,
 }
 
 #[pymethods]
@@ -510,6 +496,26 @@ fn begin_transaction<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     })
 }
 
+#[pyfunction]
+fn _set_active_transaction(tx: Option<Bound<'_, PyTransactionHandle>>) -> PyResult<()> {
+    if let Some(tx_ref) = tx {
+        transaction::set_current_transaction(Some(tx_ref.borrow().handle.clone()));
+    } else {
+        transaction::set_current_transaction(None);
+    }
+    Ok(())
+}
+
+#[pyfunction]
+fn _get_active_transaction(py: Python<'_>) -> PyResult<Option<Py<PyTransactionHandle>>> {
+    if let Some(tx_arc) = transaction::get_current_transaction() {
+        let py_handle = PyTransactionHandle { handle: tx_arc };
+        Ok(Some(Py::new(py, py_handle)?))
+    } else {
+        Ok(None)
+    }
+}
+
 // ###
 // Raw Parameterized SQL
 // ###
@@ -556,21 +562,23 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.worker_threads(4).enable_all();
-    // let rt = get_or_init_runtime();
     pyo3_async_runtimes::tokio::init(builder);
 
     m.add_class::<PyQueryBuilder>()?;
     m.add_class::<PyTransactionHandle>()?;
     m.add_function(wrap_pyfunction!(begin_transaction, m)?)?;
-    m.add_function(wrap_pyfunction!(setup,            m)?)?;
-    m.add_function(wrap_pyfunction!(register_lookup,  m)?)?;
+    m.add_function(wrap_pyfunction!(_set_active_transaction, m)?)?;
+    m.add_function(wrap_pyfunction!(_get_active_transaction, m)?)?;
+    m.add_function(wrap_pyfunction!(_get_active_transaction, m)?)?;
+    m.add_function(wrap_pyfunction!(setup, m)?)?;
+    m.add_function(wrap_pyfunction!(register_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(available_lookups,m)?)?;
-    m.add_function(wrap_pyfunction!(is_connected,     m)?)?;
-    m.add_function(wrap_pyfunction!(pool_stats,       m)?)?;
-    m.add_function(wrap_pyfunction!(raw_fetch,           m)?)?;
-    m.add_function(wrap_pyfunction!(raw_execute,         m)?)?;
+    m.add_function(wrap_pyfunction!(is_connected, m)?)?;
+    m.add_function(wrap_pyfunction!(pool_stats, m)?)?;
+    m.add_function(wrap_pyfunction!(raw_fetch, m)?)?;
+    m.add_function(wrap_pyfunction!(raw_execute, m)?)?;
     m.add_function(wrap_pyfunction!(execute_with_params, m)?)?;
-    m.add_function(wrap_pyfunction!(fetch_with_params,   m)?)?;
+    m.add_function(wrap_pyfunction!(fetch_with_params, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

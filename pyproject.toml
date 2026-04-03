@@ -19,7 +19,7 @@ build-backend = "maturin"
 
 [project]
 name = "ryx"
-version = "0.1.2"
+version = "0.1.0"
 description = "A Django-style Python ORM powered by sqlx (Rust) via PyO3."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,7 +45,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-
+    "ipython>=8.0.0",  # for the `ryx inspect` REPL
 ]
 
 [project.urls]
@@ -55,11 +55,11 @@ Repository = "https://github.com/AllDotPy/Ryx"
 Issues = "https://github.com/AllDotPy/Ryx/issues"
 
 [project.scripts]
-ryx = "ryx._cli:main"
+ryx = "ryx.__main__:main"
 
 [tool.maturin]
 python-source = "."
-module-name = "ryx._ryx"
+module-name = "ryx.ryx_core"
 bindings = "pyo3"
 packages = ["ryx"]
 # compatibility = "manylinux2014"

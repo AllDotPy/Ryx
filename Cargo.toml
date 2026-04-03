@@ -26,7 +26,7 @@ crate-type = ["cdylib", "rlib"]
 #   ryx = { version = "0.1", features = ["sqlite", "mysql"] }
 # ──────────────────────────────────────────────────────────────────────────────
 [features]
-default = ["postgres"]
+default = ["postgres", "mysql", "sqlite"]  # enable all backends by default for dev convenience
 postgres = ["sqlx/postgres"]
 mysql = ["sqlx/mysql"]
 sqlite = ["sqlx/sqlite"]

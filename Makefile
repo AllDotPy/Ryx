@@ -5,7 +5,7 @@
 .PHONY: help dev build test clean install
 
 help:
-	@echo "Falcorn Python Bindings"
+	@echo "Ryx Python Bindings"
 	@echo ""
 	@echo "Available commands:"
 	@echo "  make dev      - Build and install in development mode"
@@ -21,11 +21,11 @@ build:
 	maturin build --release
 
 test:
-	pytest ./tests/
+	python test.py all
 
 clean:
 	rm -rf target/
-	rm -rf Falcorn.egg-info/
+	rm -rf Ryx.egg-info/
 	rm -rf dist/
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete

@@ -1,39 +1,37 @@
-# bitya/validators.py
-#
-# ──────────────────────────────────────────────────────────────────────────────
-# Bitya ORM — Validation System
-#
-# Two levels of validation:
-#   1. Field-level  : each Field carries zero or more Validator instances that
-#      check a single value (max_length, min_value, regex, not_blank, ...).
-#   2. Model-level  : Model.clean() is an async hook the user overrides to add
-#      cross-field validation (e.g. end_date > start_date).
-#
-# ValidationError carries a dict  { field_name: [error_message, ...] }  so the
-# caller can show per-field error messages (useful for API responses).
-#
-# Usage (field level)::
-#
-#   class Post(Model):
-#       title = CharField(max_length=200, validators=[MinLengthValidator(5)])
-#       age   = IntField(validators=[RangeValidator(0, 150)])
-#
-# Usage (model level)::
-#
-#   class Event(Model):
-#       start = DateTimeField()
-#       end   = DateTimeField()
-#
-#       async def clean(self):
-#           if self.end <= self.start:
-#               raise ValidationError({"end": ["end must be after start"]})
-#
-# Field declarations also accept shorthand kwargs that are automatically
-# converted to validators by the Field constructor:
-#   CharField(max_length=100)   → MaxLengthValidator(100)
-#   IntField(min_value=0)       → MinValueValidator(0)
-#   CharField(blank=False)      → NotBlankValidator()
-# ──────────────────────────────────────────────────────────────────────────────
+"""
+Ryx ORM — Validation System
+
+Two levels of validation:
+  1. Field-level  : each Field carries zero or more Validator instances that
+     check a single value (max_length, min_value, regex, not_blank, ...).
+  2. Model-level  : Model.clean() is an async hook the user overrides to add
+     cross-field validation (e.g. end_date > start_date).
+
+ValidationError carries a dict  { field_name: [error_message, ...] }  so the
+caller can show per-field error messages (useful for API responses).
+
+Usage (field level)::
+
+  class Post(Model):
+      title = CharField(max_length=200, validators=[MinLengthValidator(5)])
+      age   = IntField(validators=[RangeValidator(0, 150)])
+
+Usage (model level)::
+
+  class Event(Model):
+      start = DateTimeField()
+      end   = DateTimeField()
+
+      async def clean(self):
+          if self.end <= self.start:
+              raise ValidationError({"end": ["end must be after start"]})
+
+Field declarations also accept shorthand kwargs that are automatically
+converted to validators by the Field constructor:
+  CharField(max_length=100)   → MaxLengthValidator(100)
+  IntField(min_value=0)       → MinValueValidator(0)
+  CharField(blank=False)      → NotBlankValidator()
+"""
 
 from __future__ import annotations
 
@@ -67,6 +65,10 @@ class Validator:
     def __call__(self, value: Any) -> None:
         """Validate ``value``. Raise ValidationError if invalid."""
         raise NotImplementedError
+
+    def validate(self, value: Any) -> None:
+        """Alias for __call__ for compatibility."""
+        return self.__call__(value)
 
 
 ####
@@ -313,5 +315,7 @@ async def run_full_validation(instance) -> None:
         except ValidationError as e:
             combined.merge(e)
 
+    # Drop any empty-error entries and raise only when concrete messages are present.
+    combined.errors = {field: msgs for field, msgs in combined.errors.items() if msgs}
     if combined.errors:
         raise combined

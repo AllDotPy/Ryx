@@ -223,3 +223,10 @@ target
 
 # Readme (Not ready yet)
 README.md
+
+# Local configuration file for tests
+*.sqlite3
+*.db
+
+libryx_core*
+*.lock

@@ -1,14 +1,14 @@
-# 
-# Ryx ORM — Python Exception Hierarchy
-#
-# We mirror Django's exception structure so that developers familiar with
-# Django feel at home. All exceptions inherit from RyxError so users can
-# catch everything with a single `except RyxError`.
-#
-# These Python exceptions are raised by the pure-Python QuerySet / Model
-# layer. The Rust layer raises generic RuntimeError / ValueError which the
-# Python layer re-wraps into these typed exceptions where appropriate.
-# 
+"""
+Ryx ORM — Python Exception Hierarchy
+
+We mirror Django's exception structure so that developers familiar with
+Django feel at home. All exceptions inherit from RyxError so users can
+catch everything with a single `except RyxError`.
+
+These Python exceptions are raised by the pure-Python QuerySet / Model
+layer. The Rust layer raises generic RuntimeError / ValueError which the
+Python layer re-wraps into these typed exceptions where appropriate.
+"""
 
 from typing import Any
 
