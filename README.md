@@ -1,12 +1,34 @@
-# Ryx ORM
+<p align="center">
+  <img src="logo.svg" alt="Ryx ORM" width="80" height="80" />
+</p>
 
-**Django-style Python ORM. Powered by Rust.**
+<h1 align="center">Ryx ORM</h1>
+
+<p align="center">
+  <strong>Django-style Python ORM. Powered by Rust.</strong>
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/ryx/"><img src="https://img.shields.io/badge/python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+" /></a>
+  <a href="https://github.com/AllDotPy/Ryx/releases"><img src="https://img.shields.io/badge/v0.1.0--beta-orange?style=for-the-badge" alt="Version" /></a>
+  <a href="https://github.com/AllDotPy/Ryx/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-green?style=for-the-badge" alt="License" /></a>
+  <a href="https://github.com/rust-lang/rust"><img src="https://img.shields.io/badge/rust-1.83%2B-orange?style=for-the-badge&logo=rust" alt="Rust 1.83+" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AllDotPy/Ryx/stargazers"><img src="https://img.shields.io/github/stars/AllDotPy/Ryx?style=social" alt="GitHub stars" /></a>
+</p>
+
+---
 
 Ryx gives you the query API you love — `.filter()`, `Q` objects, aggregations, relationships — with the raw performance of a compiled Rust core. Async-native. Zero event-loop blocking.
 
 ```python
 import ryx
-from ryx import Model, CharField, IntField, BooleanField, DateTimeField, Q, Count, Sum
+from ryx import (
+    Model, CharField, IntField, BooleanField, 
+    DateTimeField, Q, Count, Sum
+)
 
 class Post(Model):
     title = CharField(max_length=200)
@@ -89,13 +111,9 @@ asyncio.run(main())
 
 ## Architecture
 
-```
-Python (Models · QuerySet · Fields · Signals)
-    ↓ PyO3
-Rust  (AST · Compiler · Executor · Pool)
-    ↓ sqlx
-Database (PostgreSQL · MySQL · SQLite)
-```
+<p align="center">
+  <img src="ryx_architecture.svg" alt="Ryx Architecture" width="100%" />
+</p>
 
 Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded back — all without blocking the Python event loop.
 
