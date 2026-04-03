@@ -26,8 +26,8 @@
 //       await tx.rollback_to("sp1")
 // ###
 
-use std::sync::{Arc, Mutex as StdMutex};
 use once_cell::sync::OnceCell;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 use sqlx::{Any, Transaction};
@@ -35,10 +35,11 @@ use tracing::{debug, instrument};
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;
-use crate::query::compiler::CompiledQuery;
 use crate::query::ast::SqlValue;
+use crate::query::compiler::CompiledQuery;
 
-static ACTIVE_TX: OnceCell<StdMutex<Option<Arc<Mutex<Option<TransactionHandle>>>>>> = OnceCell::new();
+static ACTIVE_TX: OnceCell<StdMutex<Option<Arc<Mutex<Option<TransactionHandle>>>>>> =
+    OnceCell::new();
 
 pub fn set_current_transaction(tx: Option<Arc<Mutex<Option<TransactionHandle>>>>) {
     let lock = ACTIVE_TX.get_or_init(|| StdMutex::new(None));
@@ -72,10 +73,7 @@ impl TransactionHandle {
     pub async fn begin() -> RyxResult<Self> {
         let pool = pool::get()?;
         debug!("Beginning transaction");
-        let tx = pool
-            .begin()
-            .await
-            .map_err(RyxError::Database)?;
+        let tx = pool.begin().await.map_err(RyxError::Database)?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(Some(tx))),
@@ -122,14 +120,16 @@ impl TransactionHandle {
 
     /// Roll back to a named savepoint.
     pub async fn rollback_to(&self, name: &str) -> RyxResult<()> {
-        self.execute_raw(&format!("ROLLBACK TO SAVEPOINT {name}")).await?;
+        self.execute_raw(&format!("ROLLBACK TO SAVEPOINT {name}"))
+            .await?;
         debug!("Rolled back to savepoint: {name}");
         Ok(())
     }
 
     /// Release (drop) a named savepoint.
     pub async fn release_savepoint(&self, name: &str) -> RyxResult<()> {
-        self.execute_raw(&format!("RELEASE SAVEPOINT {name}")).await?;
+        self.execute_raw(&format!("RELEASE SAVEPOINT {name}"))
+            .await?;
         Ok(())
     }
 
@@ -148,10 +148,7 @@ impl TransactionHandle {
         for value in &query.values {
             q = bind_value(q, value);
         }
-        let result = q
-            .execute(&mut **tx)
-            .await
-            .map_err(RyxError::Database)?;
+        let result = q.execute(&mut **tx).await.map_err(RyxError::Database)?;
         Ok(result.rows_affected())
     }
 
@@ -186,28 +183,31 @@ impl TransactionHandle {
         use sqlx::{Column, Row};
         let rows = q.fetch_all(&mut **tx).await.map_err(RyxError::Database)?;
 
-        Ok(rows.iter().map(|row| {
-            let mut map = std::collections::HashMap::new();
-            for col in row.columns() {
-                let name = col.name().to_string();
-                let val: serde_json::Value =
-                    if let Ok(b) = row.try_get::<bool, _>(col.ordinal()) {
-                        serde_json::Value::Bool(b)
-                    } else if let Ok(i) = row.try_get::<i64, _>(col.ordinal()) {
-                        serde_json::Value::Number(i.into())
-                    } else if let Ok(f) = row.try_get::<f64, _>(col.ordinal()) {
-                        serde_json::Number::from_f64(f)
-                            .map(serde_json::Value::Number)
-                            .unwrap_or(serde_json::Value::Null)
-                    } else if let Ok(s) = row.try_get::<String, _>(col.ordinal()) {
-                        serde_json::Value::String(s)
-                    } else {
-                        serde_json::Value::Null
-                    };
-                map.insert(name, val);
-            }
-            map
-        }).collect())
+        Ok(rows
+            .iter()
+            .map(|row| {
+                let mut map = std::collections::HashMap::new();
+                for col in row.columns() {
+                    let name = col.name().to_string();
+                    let val: serde_json::Value =
+                        if let Ok(b) = row.try_get::<bool, _>(col.ordinal()) {
+                            serde_json::Value::Bool(b)
+                        } else if let Ok(i) = row.try_get::<i64, _>(col.ordinal()) {
+                            serde_json::Value::Number(i.into())
+                        } else if let Ok(f) = row.try_get::<f64, _>(col.ordinal()) {
+                            serde_json::Number::from_f64(f)
+                                .map(serde_json::Value::Number)
+                                .unwrap_or(serde_json::Value::Null)
+                        } else if let Ok(s) = row.try_get::<String, _>(col.ordinal()) {
+                            serde_json::Value::String(s)
+                        } else {
+                            serde_json::Value::Null
+                        };
+                    map.insert(name, val);
+                }
+                map
+            })
+            .collect())
     }
 
     /// Whether the transaction is still active (not yet committed or rolled back).
@@ -222,12 +222,12 @@ fn bind_value<'q>(
     value: &'q SqlValue,
 ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
     match value {
-        SqlValue::Null     => q.bind(None::<String>),
-        SqlValue::Bool(b)  => q.bind(*b),
-        SqlValue::Int(i)   => q.bind(*i),
+        SqlValue::Null => q.bind(None::<String>),
+        SqlValue::Bool(b) => q.bind(*b),
+        SqlValue::Int(i) => q.bind(*i),
         SqlValue::Float(f) => q.bind(*f),
-        SqlValue::Text(s)  => q.bind(s.as_str()),
-        SqlValue::List(_)  => {
+        SqlValue::Text(s) => q.bind(s.as_str()),
+        SqlValue::List(_) => {
             tracing::warn!("List value in transaction execute — compiler bug");
             q
         }

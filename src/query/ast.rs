@@ -36,10 +36,10 @@ pub enum SqlValue {
 impl SqlValue {
     pub fn type_name(&self) -> &'static str {
         match self {
-            SqlValue::Null    => "None",
+            SqlValue::Null => "None",
             SqlValue::Bool(_) => "bool",
-            SqlValue::Int(_)  => "int",
-            SqlValue::Float(_)=> "float",
+            SqlValue::Int(_) => "int",
+            SqlValue::Float(_) => "float",
             SqlValue::Text(_) => "str",
             SqlValue::List(_) => "list",
         }
@@ -66,9 +66,9 @@ impl SqlValue {
 pub enum QNode {
     /// A single filter condition (leaf of the tree).
     Leaf {
-        field:   String,
-        lookup:  String,
-        value:   SqlValue,
+        field: String,
+        lookup: String,
+        value: SqlValue,
         negated: bool,
     },
     /// All children must be true (SQL: A AND B AND C).
@@ -79,21 +79,21 @@ pub enum QNode {
     Not(Box<QNode>),
 }
 
-// 
+//
 // FilterNode — a single flat WHERE condition (legacy, kept for QueryBuilder)
-// 
+//
 #[derive(Debug, Clone)]
 pub struct FilterNode {
-    pub field:   String,
-    pub lookup:  String,
-    pub value:   SqlValue,
+    pub field: String,
+    pub lookup: String,
+    pub value: SqlValue,
     /// If true the condition is wrapped in NOT(...). Set by `.exclude()`.
     pub negated: bool,
 }
 
-// 
+//
 // JoinClause
-// 
+//
 /// The kind of SQL JOIN to emit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JoinKind {
@@ -117,13 +117,13 @@ pub enum JoinKind {
 /// → INNER JOIN "authors" AS "a" ON "posts"."author_id" = "a"."id"
 #[derive(Debug, Clone)]
 pub struct JoinClause {
-    pub kind:     JoinKind,
+    pub kind: JoinKind,
     /// The table to join.
-    pub table:    String,
+    pub table: String,
     /// Optional alias for the joined table (used in ON / SELECT columns).
-    pub alias:    Option<String>,
+    pub alias: Option<String>,
     /// Left-hand side of the ON condition: "table.column" or just "column".
-    pub on_left:  String,
+    pub on_left: String,
     /// Right-hand side of the ON condition.
     pub on_right: String,
 }
@@ -157,7 +157,7 @@ impl AggFunc {
             AggFunc::Avg => "AVG",
             AggFunc::Min => "MIN",
             AggFunc::Max => "MAX",
-            AggFunc::Raw(s)  => s.as_str(),
+            AggFunc::Raw(s) => s.as_str(),
         }
     }
 }
@@ -170,24 +170,27 @@ impl AggFunc {
 #[derive(Debug, Clone)]
 pub struct AggregateExpr {
     /// The Python-side name (key in the returned dict).
-    pub alias:    String,
+    pub alias: String,
     /// The aggregate function.
-    pub func:     AggFunc,
+    pub func: AggFunc,
     /// The column to aggregate. `"*"` is valid only for COUNT.
-    pub field:    String,
+    pub field: String,
     /// If true: COUNT(DISTINCT col) / SUM(DISTINCT col).
     pub distinct: bool,
 }
 
-// 
+//
 // OrderByClause
-// 
+//
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SortDirection { Asc, Desc }
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
 
 #[derive(Debug, Clone)]
 pub struct OrderByClause {
-    pub field:     String,
+    pub field: String,
     pub direction: SortDirection,
 }
 
@@ -195,16 +198,22 @@ impl OrderByClause {
     /// Parse Django-style `"-field"` → DESC, `"field"` → ASC.
     pub fn parse(s: &str) -> Self {
         if let Some(f) = s.strip_prefix('-') {
-            Self { field: f.to_string(), direction: SortDirection::Desc }
+            Self {
+                field: f.to_string(),
+                direction: SortDirection::Desc,
+            }
         } else {
-            Self { field: s.to_string(), direction: SortDirection::Asc }
+            Self {
+                field: s.to_string(),
+                direction: SortDirection::Asc,
+            }
         }
     }
 }
 
-// 
+//
 // QueryOperation
-// 
+//
 #[derive(Debug, Clone)]
 pub enum QueryOperation {
     /// Regular SELECT — returns rows.
@@ -218,13 +227,18 @@ pub enum QueryOperation {
     /// SELECT COUNT(*) — returns a single integer.
     Count,
     Delete,
-    Update  { assignments: Vec<(String, SqlValue)> },
-    Insert  { values: Vec<(String, SqlValue)>, returning_id: bool },
+    Update {
+        assignments: Vec<(String, SqlValue)>,
+    },
+    Insert {
+        values: Vec<(String, SqlValue)>,
+        returning_id: bool,
+    },
 }
 
-// 
+//
 // QueryNode — the complete query AST
-// 
+//
 /// The complete query AST. Produced by the Python QuerySet and consumed by the
 /// SQL compiler.
 ///
@@ -236,10 +250,10 @@ pub enum QueryOperation {
 ///   - `having`      : HAVING conditions (flat list, AND-ed, same as filters)
 #[derive(Debug, Clone)]
 pub struct QueryNode {
-    pub table:  String,
+    pub table: String,
     pub operation: QueryOperation,
 
-    // # WHERE 
+    // # WHERE
     /// Flat AND-chained filter conditions (from `.filter()` / `.exclude()`).
     /// These are always AND-ed with each other and with `q_filter`.
     pub filters: Vec<FilterNode>,
@@ -249,7 +263,7 @@ pub struct QueryNode {
     // # JOINs
     pub joins: Vec<JoinClause>,
 
-    // # Aggregations 
+    // # Aggregations
     /// Aggregate expressions added by `.annotate()` or `.aggregate()`.
     pub annotations: Vec<AggregateExpr>,
     /// GROUP BY columns (from `.values("field")` combined with aggregate).
@@ -257,10 +271,10 @@ pub struct QueryNode {
     /// HAVING conditions — same format as filters, applied after GROUP BY.
     pub having: Vec<FilterNode>,
 
-    // #  Ordering / paging 
+    // #  Ordering / paging
     pub order_by: Vec<OrderByClause>,
-    pub limit:    Option<u64>,
-    pub offset:   Option<u64>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
     pub distinct: bool,
 }
 
@@ -268,18 +282,18 @@ impl QueryNode {
     /// Base SELECT * for a table. Starting point for every QuerySet.
     pub fn select(table: impl Into<String>) -> Self {
         Self {
-            table:      table.into(),
-            operation:  QueryOperation::Select { columns: None },
-            filters:    Vec::new(),
-            q_filter:   None,
-            joins:      Vec::new(),
-            annotations:Vec::new(),
-            group_by:   Vec::new(),
-            having:     Vec::new(),
-            order_by:   Vec::new(),
-            limit:      None,
-            offset:     None,
-            distinct:   false,
+            table: table.into(),
+            operation: QueryOperation::Select { columns: None },
+            filters: Vec::new(),
+            q_filter: None,
+            joins: Vec::new(),
+            annotations: Vec::new(),
+            group_by: Vec::new(),
+            having: Vec::new(),
+            order_by: Vec::new(),
+            limit: None,
+            offset: None,
+            distinct: false,
         }
     }
 
@@ -299,7 +313,7 @@ impl QueryNode {
 
     #[must_use]
     pub fn with_filter(mut self, node: FilterNode) -> Self {
-        self.filters.push(node); 
+        self.filters.push(node);
         self
     }
 
@@ -314,43 +328,43 @@ impl QueryNode {
 
     #[must_use]
     pub fn with_join(mut self, j: JoinClause) -> Self {
-        self.joins.push(j); 
+        self.joins.push(j);
         self
     }
 
     #[must_use]
     pub fn with_annotation(mut self, agg: AggregateExpr) -> Self {
-        self.annotations.push(agg); 
+        self.annotations.push(agg);
         self
     }
 
     #[must_use]
     pub fn with_group_by(mut self, field: String) -> Self {
-        self.group_by.push(field); 
+        self.group_by.push(field);
         self
     }
 
     #[must_use]
     pub fn with_having(mut self, f: FilterNode) -> Self {
-        self.having.push(f); 
+        self.having.push(f);
         self
     }
 
     #[must_use]
     pub fn with_order_by(mut self, c: OrderByClause) -> Self {
-        self.order_by.push(c); 
+        self.order_by.push(c);
         self
     }
 
     #[must_use]
     pub fn with_limit(mut self, n: u64) -> Self {
-        self.limit = Some(n); 
+        self.limit = Some(n);
         self
     }
 
     #[must_use]
     pub fn with_offset(mut self, n: u64) -> Self {
-        self.offset = Some(n); 
+        self.offset = Some(n);
         self
     }
 }

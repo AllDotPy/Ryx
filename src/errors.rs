@@ -32,8 +32,7 @@ use thiserror::Error;
 /// below whenever a `#[pyfunction]` or `#[pymethods]` method returns `Err(...)`.
 #[derive(Debug, Error)]
 pub enum RyxError {
-    // Database-level errors 
-
+    // Database-level errors
     /// Wraps every error produced by sqlx (connection failures, query errors,
     /// constraint violations, etc.). We keep the original sqlx error so that
     /// tracing/logging can capture the full details.
@@ -50,8 +49,7 @@ pub enum RyxError {
     #[error("Query returned multiple objects; expected exactly one")]
     MultipleObjectsReturned,
 
-    // Connection pool errors 
-
+    // Connection pool errors
     /// Raised when user code calls any ORM operation before `Ryx.setup()`
     /// has been called to initialize the connection pool.
     #[error("Connection pool is not initialized. Call Ryx.setup() first.")]
@@ -62,8 +60,7 @@ pub enum RyxError {
     #[error("Connection pool already initialized")]
     PoolAlreadyInitialized,
 
-    // Query building errors 
-
+    // Query building errors
     /// Raised when the Python side passes an unrecognized lookup suffix.
     /// Example: `filter(age__foobar=42)` where "foobar" is not a registered
     /// lookup. We include the lookup name so the error is actionable.
@@ -84,8 +81,7 @@ pub enum RyxError {
         got: String,
     },
 
-    // Runtime / internal errors 
-
+    // Runtime / internal errors
     /// Catch-all for internal errors that shouldn't reach users but are
     /// wrapped here so we don't use `.unwrap()` anywhere in the codebase.
     /// If this appears in production, it's always a bug — please file an issue.
