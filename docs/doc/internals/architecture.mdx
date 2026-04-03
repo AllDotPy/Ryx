@@ -1,0 +1,104 @@
+---
+sidebar_position: 2
+---
+
+# Architecture
+
+Ryx is built in three layers, each with a clear responsibility.
+
+## Layer Diagram
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Python Layer  (ryx/)                                    │
+│  Model · QuerySet · Q · Fields · Validators · Signals    │
+│  Transactions · Relations · Migrations · CLI             │
+├──────────────────────────────────────────────────────────┤
+│  PyO3 Boundary  (src/lib.rs)                             │
+│  QueryBuilder · TransactionHandle · Type Bridge · Async  │
+├──────────────────────────────────────────────────────────┤
+│  Rust Core  (src/)                                       │
+│  AST · Q-Trees · SQL Compiler · Executor · Pool · Tx     │
+├──────────────────────────────────────────────────────────┤
+│  sqlx 0.8.6  +  tokio 1.40                               │
+│  AnyPool · Async Drivers · Transactions                  │
+├──────────────────────────────────────────────────────────┤
+│  PostgreSQL · MySQL · SQLite                             │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Query Execution Flow
+
+```
+Python: Post.objects.filter(active=True).order_by("-views").limit(10)
+    │
+    ▼
+QuerySet builds QueryNode (immutable builder pattern)
+    │
+    ▼
+PyQueryBuilder.fetch_all() — crosses PyO3 boundary
+    │
+    ▼
+compiler::compile(&QueryNode) → CompiledQuery { sql, values }
+    │
+    ▼
+executor::fetch_all(compiled) → sqlx::query(sql).bind(values).fetch_all(pool)
+    │
+    ▼
+decode_row(AnyRow) → HashMap<String, JsonValue>
+    │
+    ▼
+json_to_py() → PyDict
+    │
+    ▼
+Model._from_row(row) → List[Model]
+```
+
+## Key Design Decisions
+
+### Immutable Builders
+
+Both Python QuerySet and Rust QueryNode use immutable builders — every method returns a new instance:
+
+```rust
+// Rust: self by value, not &mut self
+pub fn add_filter(self, field: &str, lookup: &str, value: SqlValue) -> Self { ... }
+```
+
+```python
+# Python: returns new QuerySet
+def filter(self, **kwargs) -> "QuerySet":
+    clone = self._clone()
+    clone.builder.add_filter(...)
+    return clone
+```
+
+### GIL Minimization
+
+The Rust executor holds no Python GIL during SQL execution:
+
+1. Decode `AnyRow` → `HashMap<String, JsonValue>` (no GIL)
+2. Convert `HashMap` → `PyDict` (brief GIL hold at boundary)
+3. Python wraps `PyDict` → `Model` instances
+
+### ContextVar Transaction Propagation
+
+Active transactions use `contextvars.ContextVar` — they propagate through async call stacks automatically:
+
+```python
+async with ryx.transaction():
+    await some_function()  # Uses the same transaction
+    await another_function()  # Still in the same transaction
+```
+
+### AnyPool Over Typed Pools
+
+`sqlx::any::AnyPool` provides a single code path for all backends:
+
+- **Pro**: One codebase, runtime database selection
+- **Con**: No compile-time query checking
+- **Trade-off**: Worth it for a dynamic ORM
+
+## Next Steps
+
+→ **[Rust Core](./rust-core)** — Deep dive into each Rust module

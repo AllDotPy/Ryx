@@ -1,0 +1,91 @@
+---
+sidebar_position: 5
+---
+
+# Connection Pool
+
+Ryx uses sqlx's `AnyPool` — a unified connection pool that works across PostgreSQL, MySQL, and SQLite.
+
+## Singleton Pattern
+
+```rust
+static POOL: OnceLock<AnyPool> = OnceLock::new();
+```
+
+The pool is a global singleton initialized once at startup.
+
+## Configuration
+
+```python
+await ryx.setup(
+    "postgres://user:pass@localhost/mydb",
+    max_connections=20,    # Max open connections
+    min_connections=2,     # Min idle connections to maintain
+    connect_timeout=30,    # Seconds to wait for a connection
+    idle_timeout=600,      # Seconds before idle conn is closed
+    max_lifetime=1800,     # Max lifetime of a connection
+)
+```
+
+## Pool Statistics
+
+```python
+stats = ryx.pool_stats()
+print(stats)
+# → {
+#     "size": 5,           # Current total connections
+#     "available": 3,      # Idle and ready
+#     "in_use": 2,         # Currently executing a query
+#   }
+```
+
+## Connection Lifecycle
+
+```
+Application requests connection
+    │
+    ▼
+Pool has idle connection? ──Yes──→ Return it
+    │
+   No
+    │
+    ▼
+Pool size < max? ──Yes──→ Create new connection
+    │
+   No
+    │
+    ▼
+Wait (up to connect_timeout)
+    │
+    ▼
+Timeout → Error
+```
+
+## Transaction Awareness
+
+The executor checks for an active transaction before using the pool:
+
+```rust
+// If there's an active transaction, use its connection
+if let Some(tx) = ACTIVE_TX.get() {
+    tx.execute(query).await
+} else {
+    pool.execute(query).await  // Use pool directly
+}
+```
+
+This ensures queries inside transactions use the same connection.
+
+## Backend URLs
+
+| Prefix | Backend | Example |
+|---|---|---|
+| `postgres://` | PostgreSQL | `postgres://user:pass@localhost:5432/db` |
+| `mysql://` | MySQL | `mysql://user:pass@localhost:3306/db` |
+| `mariadb://` | MariaDB | `mariadb://user:pass@localhost:3306/db` |
+| `sqlite:///` | SQLite file | `sqlite:///data/app.db` |
+| `sqlite::memory:` | SQLite RAM | `sqlite::memory:` |
+
+## Next Steps
+
+→ **[Type Conversion](./type-conversion)** — Python ↔ SQL value bridges
