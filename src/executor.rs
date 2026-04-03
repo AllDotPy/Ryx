@@ -10,7 +10,7 @@
 //   4. Decodes each result row into a `HashMap<String, serde_json::Value>`
 //      which is then converted to a Python dict on the PyO3 boundary
 
-// # Why HashMap<String, serde_json::Value> as the row type? 
+// # Why HashMap<String, serde_json::Value> as the row type?
 
 // We need to pass row data back to Python as a dict. Using `serde_json::Value`
 // as the intermediate representation lets us:
@@ -23,36 +23,29 @@
 // event loop. By decoding to a Rust data structure first and converting only
 // at the end, we minimize GIL hold time.
 
-// # Value binding strategy 
+// # Value binding strategy
 
 // sqlx's `AnyPool` requires values to be bound with `.bind()` and each value
 // must implement `sqlx::Encode<sqlx::Any>`. Our `SqlValue` enum covers the
 // full set of types we support, so we match on it and call `.bind()` for each
 // variant.
 
-// # Transaction support 
+// # Transaction support
 
 // The executor works against any `sqlx::Executor` — either the pool directly
 // or a `Transaction`. This lets us share execution logic between the regular
 // path and the transactional path without code duplication.
 // ###
 
-
 use std::collections::HashMap;
 
 use serde_json::Value as JsonValue;
-use sqlx::{
-    any::AnyRow,
-    Column, Row,
-};
+use sqlx::{Column, Row, any::AnyRow};
 use tracing::{debug, instrument};
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;
-use crate::query::{
-    ast::SqlValue,
-    compiler::CompiledQuery,
-};
+use crate::query::{ast::SqlValue, compiler::CompiledQuery};
 use crate::transaction;
 
 // ###
@@ -106,10 +99,7 @@ pub async fn fetch_all(query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
     q = bind_values(q, &query.values);
 
     // Fetch all rows and decode each one into a DecodedRow.
-    let rows = q
-        .fetch_all(pool)
-        .await
-        .map_err(RyxError::Database)?;
+    let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
 
     let decoded = rows.iter().map(decode_row).collect();
     Ok(decoded)
@@ -137,7 +127,9 @@ pub async fn fetch_count(query: CompiledQuery) -> RyxResult<i64> {
                     return Ok(f as i64);
                 }
             }
-            return Err(RyxError::Internal("COUNT() returned unexpected value".into()));
+            return Err(RyxError::Internal(
+                "COUNT() returned unexpected value".into(),
+            ));
         }
         return Err(RyxError::Internal("Transaction is no longer active".into()));
     }
@@ -149,10 +141,7 @@ pub async fn fetch_count(query: CompiledQuery) -> RyxResult<i64> {
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
 
-    let row = q
-        .fetch_one(pool)
-        .await
-        .map_err(RyxError::Database)?;
+    let row = q.fetch_one(pool).await.map_err(RyxError::Database)?;
 
     // COUNT(*) always returns a single column. We try to get it as i64
     // first (Postgres/SQLite), then fall back to i32 (some MySQL versions).
@@ -197,10 +186,7 @@ pub async fn fetch_one(query: CompiledQuery) -> RyxResult<DecodedRow> {
         // Limit to 2 at the executor level (the QueryNode may already have
         // LIMIT 1 set by `.first()`, but for `.get()` it doesn't).
         // We check the count in Rust rather than adding SQL complexity.
-        let rows = q
-            .fetch_all(pool)
-            .await
-            .map_err(RyxError::Database)?;
+        let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
 
         match rows.len() {
             0 => Err(RyxError::DoesNotExist),
@@ -226,9 +212,9 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
             // Check if this is a RETURNING query
             if query.sql.to_uppercase().contains("RETURNING") {
                 let rows = active_tx.fetch_query(query).await?;
-                let last_insert_id = rows.first().and_then(|row| {
-                    row.values().next().and_then(|v| v.as_i64())
-                });
+                let last_insert_id = rows
+                    .first()
+                    .and_then(|row| row.values().next().and_then(|v| v.as_i64()));
                 return Ok(MutationResult {
                     rows_affected: 1,
                     last_insert_id,
@@ -252,14 +238,9 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
         let mut q = sqlx::query(&query.sql);
         q = bind_values(q, &query.values);
 
-        let rows = q
-            .fetch_all(pool)
-            .await
-            .map_err(RyxError::Database)?;
+        let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
 
-        let last_insert_id = rows.first().and_then(|row| {
-            row.try_get::<i64, _>(0).ok()
-        });
+        let last_insert_id = rows.first().and_then(|row| row.try_get::<i64, _>(0).ok());
 
         return Ok(MutationResult {
             rows_affected: rows.len() as u64,
@@ -270,10 +251,7 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
 
-    let result = q
-        .execute(pool)
-        .await
-        .map_err(RyxError::Database)?;
+    let result = q.execute(pool).await.map_err(RyxError::Database)?;
 
     Ok(MutationResult {
         rows_affected: result.rows_affected(),
@@ -296,11 +274,11 @@ fn bind_values<'q>(
 ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
     for value in values {
         q = match value {
-            SqlValue::Null        => q.bind(None::<String>),
-            SqlValue::Bool(b)     => q.bind(*b),
-            SqlValue::Int(i)      => q.bind(*i),
-            SqlValue::Float(f)    => q.bind(*f),
-            SqlValue::Text(s)     => q.bind(s.as_str()),
+            SqlValue::Null => q.bind(None::<String>),
+            SqlValue::Bool(b) => q.bind(*b),
+            SqlValue::Int(i) => q.bind(*i),
+            SqlValue::Float(f) => q.bind(*f),
+            SqlValue::Text(s) => q.bind(s.as_str()),
             // Lists should have been expanded by the compiler into individual
             // placeholders. If we encounter a List here it's a compiler bug.
             SqlValue::List(_) => {

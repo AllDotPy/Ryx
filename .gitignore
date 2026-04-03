@@ -230,3 +230,4 @@ README.md
 
 libryx_core*
 *.lock
+tests/test_compiler.rs

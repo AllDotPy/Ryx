@@ -9,7 +9,7 @@
 //   `name__icontains="bob"` → lookup = "icontains", SQL = "LOWER(name) LIKE LOWER($1)"
 //   `id__in=[1,2,3]`        → lookup = "in",   SQL = "id IN ($1, $2, $3)"
 //
-// # Extensibility design 
+// # Extensibility design
 //
 // Users can register custom lookups from Python:
 //
@@ -29,7 +29,7 @@
 // For user-registered lookups (coming from Python callables) we store a
 // Python-side callable name and call back to Python at query-build time.
 //
-// # SQL placeholder strategy 
+// # SQL placeholder strategy
 //
 // Different databases use different placeholder syntax:
 //   PostgreSQL:  $1, $2, $3, ...
@@ -93,9 +93,9 @@ pub struct PythonLookup {
     pub sql_template: String,
 }
 
-// 
+//
 // Global lookup registry
-// 
+//
 /// The two registries live side-by-side:
 /// - `builtin`: populated once at startup with the built-in lookups
 /// - `custom`:  populated at runtime with user-registered lookups
@@ -115,7 +115,7 @@ pub fn init_registry() {
     REGISTRY.get_or_init(|| {
         let mut builtin = HashMap::new();
 
-        // Comparison lookups 
+        // Comparison lookups
         builtin.insert("exact", exact as LookupFn);
         builtin.insert("gt", gt as LookupFn);
         builtin.insert("gte", gte as LookupFn);
@@ -130,18 +130,18 @@ pub fn init_registry() {
         builtin.insert("endswith", endswith as LookupFn);
         builtin.insert("iendswith", iendswith as LookupFn);
 
-        // Null lookups 
+        // Null lookups
         // `isnull` is special: it ignores the value entirely and produces
         // IS NULL / IS NOT NULL. The value passed (True/False) is read by
         // the compiler, not by this function.
         builtin.insert("isnull", isnull as LookupFn);
 
-        // Membership lookups 
+        // Membership lookups
         // `in` is also special: the compiler expands it into
         // `col IN (?, ?, ?)` based on the number of values provided.
         builtin.insert("in", in_lookup as LookupFn);
 
-        // Range lookup 
+        // Range lookup
         builtin.insert("range", range as LookupFn);
 
         RwLock::new(LookupRegistry {
@@ -151,9 +151,9 @@ pub fn init_registry() {
     });
 }
 
-// 
+//
 // Registry public API
-// 
+//
 /// Register a custom lookup from Python.
 ///
 /// # Arguments
@@ -175,7 +175,9 @@ pub fn register_custom(name: impl Into<String>, sql_template: impl Into<String>)
 
     guard.custom.insert(
         name.into(),
-        PythonLookup { sql_template: sql_template.into() },
+        PythonLookup {
+            sql_template: sql_template.into(),
+        },
     );
 
     Ok(())

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::{Arc};
+use std::sync::Arc;
 
+use pyo3::prelude::IntoPyObject;
 use pyo3::prelude::*;
-use pyo3::prelude::{IntoPyObject};
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use serde_json::Value as JsonValue;
 use tokio::sync::Mutex as TokioMutex;
@@ -15,13 +15,12 @@ pub mod transaction;
 
 use crate::pool::PoolConfig;
 use crate::query::ast::{
-    AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind,
-    OrderByClause, QNode, QueryNode, QueryOperation, SqlValue,
+    AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, OrderByClause, QNode, QueryNode,
+    QueryOperation, SqlValue,
 };
 use crate::query::compiler;
 use crate::query::lookup;
 use crate::transaction::TransactionHandle;
-
 
 // ###
 // Setup / pool functions
@@ -49,8 +48,8 @@ fn setup<'py>(
         max_connections,
         min_connections,
         connect_timeout_secs: connect_timeout,
-        idle_timeout_secs:    idle_timeout,
-        max_lifetime_secs:    max_lifetime,
+        idle_timeout_secs: idle_timeout,
+        max_lifetime_secs: max_lifetime,
     };
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         pool::initialize(&url, config).await.map_err(PyErr::from)?;
@@ -69,7 +68,9 @@ fn available_lookups() -> PyResult<Vec<String>> {
 }
 
 #[pyfunction]
-fn is_connected() -> bool { pool::is_initialized() }
+fn is_connected() -> bool {
+    pool::is_initialized()
+}
 
 #[pyfunction]
 fn pool_stats(py: Python<'_>) -> PyResult<Py<PyAny>> {
@@ -83,7 +84,10 @@ fn pool_stats(py: Python<'_>) -> PyResult<Py<PyAny>> {
 #[pyfunction]
 fn raw_fetch<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let compiled = compiler::CompiledQuery { sql, values: vec![] };
+        let compiled = compiler::CompiledQuery {
+            sql,
+            values: vec![],
+        };
         let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| {
             let py_rows = decoded_rows_to_py(py, rows)?;
@@ -95,7 +99,10 @@ fn raw_fetch<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
 #[pyfunction]
 fn raw_execute<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let compiled = compiler::CompiledQuery { sql, values: vec![] };
+        let compiled = compiler::CompiledQuery {
+            sql,
+            values: vec![],
+        };
         executor::execute(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
     })
@@ -115,49 +122,65 @@ pub struct PyQueryBuilder {
 impl PyQueryBuilder {
     #[new]
     fn new(table: String) -> Self {
-        Self { node: QueryNode::select(table) }
+        Self {
+            node: QueryNode::select(table),
+        }
     }
 
     fn add_filter(
         &self,
-        field:   String,
-        lookup:  String,
-        value:   &Bound<'_, PyAny>,
+        field: String,
+        lookup: String,
+        value: &Bound<'_, PyAny>,
         negated: bool,
     ) -> PyResult<PyQueryBuilder> {
         let sql_value = py_to_sql_value(value)?;
         Ok(PyQueryBuilder {
-            node: self.node.clone().with_filter(FilterNode { field, lookup, value: sql_value, negated }),
+            node: self.node.clone().with_filter(FilterNode {
+                field,
+                lookup,
+                value: sql_value,
+                negated,
+            }),
         })
     }
 
     fn add_q_node(&self, node: &Bound<'_, PyAny>) -> PyResult<PyQueryBuilder> {
         let q = py_dict_to_qnode(node)?;
-        Ok(PyQueryBuilder { node: self.node.clone().with_q(q) })
+        Ok(PyQueryBuilder {
+            node: self.node.clone().with_q(q),
+        })
     }
 
     fn add_annotation(
         &self,
-        alias:    String,
-        func:     String,
-        field:    String,
+        alias: String,
+        func: String,
+        field: String,
         distinct: bool,
     ) -> PyQueryBuilder {
         let agg_func = match func.as_str() {
             "Count" => AggFunc::Count,
-            "Sum"   => AggFunc::Sum,
-            "Avg"   => AggFunc::Avg,
-            "Min"   => AggFunc::Min,
-            "Max"   => AggFunc::Max,
-            other   => AggFunc::Raw(other.to_string()),
+            "Sum" => AggFunc::Sum,
+            "Avg" => AggFunc::Avg,
+            "Min" => AggFunc::Min,
+            "Max" => AggFunc::Max,
+            other => AggFunc::Raw(other.to_string()),
         };
         PyQueryBuilder {
-            node: self.node.clone().with_annotation(AggregateExpr { alias, func: agg_func, field, distinct }),
+            node: self.node.clone().with_annotation(AggregateExpr {
+                alias,
+                func: agg_func,
+                field,
+                distinct,
+            }),
         }
     }
 
     fn add_group_by(&self, field: String) -> PyQueryBuilder {
-        PyQueryBuilder { node: self.node.clone().with_group_by(field) }
+        PyQueryBuilder {
+            node: self.node.clone().with_group_by(field),
+        }
     }
 
     fn add_join(
@@ -169,30 +192,43 @@ impl PyQueryBuilder {
         on_right: String,
     ) -> PyQueryBuilder {
         let join_kind = match kind.as_str() {
-            "LEFT" | "LEFT OUTER"  => JoinKind::LeftOuter,
+            "LEFT" | "LEFT OUTER" => JoinKind::LeftOuter,
             "RIGHT" | "RIGHT OUTER" => JoinKind::RightOuter,
-            "FULL" | "FULL OUTER"  => JoinKind::FullOuter,
+            "FULL" | "FULL OUTER" => JoinKind::FullOuter,
             "CROSS" => JoinKind::CrossJoin,
             _ => JoinKind::Inner,
         };
         let alias_opt = if alias.is_empty() { None } else { Some(alias) };
         PyQueryBuilder {
             node: self.node.clone().with_join(JoinClause {
-                kind: join_kind, table, alias: alias_opt, on_left, on_right,
+                kind: join_kind,
+                table,
+                alias: alias_opt,
+                on_left,
+                on_right,
             }),
         }
     }
 
     fn add_order_by(&self, field: String) -> PyQueryBuilder {
-        PyQueryBuilder { node: self.node.clone().with_order_by(OrderByClause::parse(&field)) }
+        PyQueryBuilder {
+            node: self
+                .node
+                .clone()
+                .with_order_by(OrderByClause::parse(&field)),
+        }
     }
 
     fn set_limit(&self, n: u64) -> PyQueryBuilder {
-        PyQueryBuilder { node: self.node.clone().with_limit(n) }
+        PyQueryBuilder {
+            node: self.node.clone().with_limit(n),
+        }
     }
 
     fn set_offset(&self, n: u64) -> PyQueryBuilder {
-        PyQueryBuilder { node: self.node.clone().with_offset(n) }
+        PyQueryBuilder {
+            node: self.node.clone().with_offset(n),
+        }
     }
 
     fn set_distinct(&self) -> PyQueryBuilder {
@@ -216,11 +252,9 @@ impl PyQueryBuilder {
         let compiled = compiler::compile(&node).map_err(PyErr::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
-            Python::attach(|py| {
-                match rows.into_iter().next() {
-                    Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
-                    None => Ok(py.None().into_pyobject(py)?.unbind()),
-                }
+            Python::attach(|py| match rows.into_iter().next() {
+                Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
+                None => Ok(py.None().into_pyobject(py)?.unbind()),
             })
         })
     }
@@ -249,11 +283,9 @@ impl PyQueryBuilder {
         let compiled = compiler::compile(&agg_node).map_err(PyErr::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
-            Python::attach(|py| {
-                match rows.into_iter().next() {
-                    Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
-                    None      => Ok(PyDict::new(py).into_any().unbind()),
-                }
+            Python::attach(|py| match rows.into_iter().next() {
+                Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
+                None => Ok(PyDict::new(py).into_any().unbind()),
             })
         })
     }
@@ -277,11 +309,13 @@ impl PyQueryBuilder {
             .into_iter()
             .map(|(col, val)| Ok::<_, PyErr>((col, py_to_sql_value(&val)?)))
             .collect::<Result<_, _>>()?;
-        
+
         let mut upd_node = self.node.clone();
-        upd_node.operation = QueryOperation::Update { assignments: rust_assignments };
+        upd_node.operation = QueryOperation::Update {
+            assignments: rust_assignments,
+        };
         let compiled = compiler::compile(&upd_node).map_err(PyErr::from)?;
-        
+
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = executor::execute(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| Ok(res.rows_affected.into_pyobject(py)?.unbind()))
@@ -298,18 +332,19 @@ impl PyQueryBuilder {
             .into_iter()
             .map(|(col, val)| Ok::<_, PyErr>((col, py_to_sql_value(&val)?)))
             .collect::<Result<_, _>>()?;
-        
+
         let mut ins_node = self.node.clone();
-        ins_node.operation = QueryOperation::Insert { values: rust_values, returning_id };
+        ins_node.operation = QueryOperation::Insert {
+            values: rust_values,
+            returning_id,
+        };
         let compiled = compiler::compile(&ins_node).map_err(PyErr::from)?;
-        
+
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = executor::execute(compiled).await.map_err(PyErr::from)?;
-            Python::attach(|py| {
-                match res.last_insert_id {
-                    Some(id) => Ok(id.into_pyobject(py)?.unbind()),
-                    None     => Ok(res.rows_affected.into_pyobject(py)?.unbind()),
-                }
+            Python::attach(|py| match res.last_insert_id {
+                Some(id) => Ok(id.into_pyobject(py)?.unbind()),
+                None => Ok(res.rows_affected.into_pyobject(py)?.unbind()),
             })
         })
     }
@@ -324,59 +359,95 @@ impl PyQueryBuilder {
 // ###
 
 fn py_to_sql_value(obj: &Bound<'_, PyAny>) -> PyResult<SqlValue> {
-    if obj.is_none() { return Ok(SqlValue::Null); }
-    if let Ok(b) = obj.cast::<PyBool>() { return Ok(SqlValue::Bool(b.is_true())); }
-    if let Ok(i) = obj.cast::<PyInt>() { return Ok(SqlValue::Int(i.extract()?)); }
-    if let Ok(f) = obj.cast::<PyFloat>() { return Ok(SqlValue::Float(f.extract()?)); }
-    if let Ok(s) = obj.cast::<PyString>() { return Ok(SqlValue::Text(s.to_str()?.to_string())); }
+    if obj.is_none() {
+        return Ok(SqlValue::Null);
+    }
+    if let Ok(b) = obj.cast::<PyBool>() {
+        return Ok(SqlValue::Bool(b.is_true()));
+    }
+    if let Ok(i) = obj.cast::<PyInt>() {
+        return Ok(SqlValue::Int(i.extract()?));
+    }
+    if let Ok(f) = obj.cast::<PyFloat>() {
+        return Ok(SqlValue::Float(f.extract()?));
+    }
+    if let Ok(s) = obj.cast::<PyString>() {
+        return Ok(SqlValue::Text(s.to_str()?.to_string()));
+    }
     if let Ok(list) = obj.cast::<PyList>() {
-        let items = list.iter().map(|i| py_to_sql_value(&i)).collect::<PyResult<_>>()?;
+        let items = list
+            .iter()
+            .map(|i| py_to_sql_value(&i))
+            .collect::<PyResult<_>>()?;
         return Ok(SqlValue::List(items));
     }
     if let Ok(tup) = obj.cast::<PyTuple>() {
-        let items = tup.iter().map(|i| py_to_sql_value(&i)).collect::<PyResult<_>>()?;
+        let items = tup
+            .iter()
+            .map(|i| py_to_sql_value(&i))
+            .collect::<PyResult<_>>()?;
         return Ok(SqlValue::List(items));
     }
     Ok(SqlValue::Text(obj.str()?.to_str()?.to_string()))
 }
 
 fn py_dict_to_qnode(obj: &Bound<'_, PyAny>) -> PyResult<QNode> {
-    let dict = obj.cast::<PyDict>().map_err(|_| {
-        pyo3::exceptions::PyValueError::new_err("Q node must be a dict")
-    })?;
+    let dict = obj
+        .cast::<PyDict>()
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("Q node must be a dict"))?;
 
-    let node_type: String = dict.get_item("type")?
+    let node_type: String = dict
+        .get_item("type")?
         .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Q node missing 'type'"))?
         .extract()?;
 
     match node_type.as_str() {
         "leaf" => {
-            let field: String = dict.get_item("field")?.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing field"))?.extract()?;
-            let lookup: String = dict.get_item("lookup")?.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing lookup"))?.extract()?;
-            let negated: bool = dict.get_item("negated")?.map(|v| v.extract::<bool>().unwrap_or(false)).unwrap_or(false);
-            let value_obj = dict.get_item("value")?.ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing value"))?;
+            let field: String = dict
+                .get_item("field")?
+                .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing field"))?
+                .extract()?;
+            let lookup: String = dict
+                .get_item("lookup")?
+                .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing lookup"))?
+                .extract()?;
+            let negated: bool = dict
+                .get_item("negated")?
+                .map(|v| v.extract::<bool>().unwrap_or(false))
+                .unwrap_or(false);
+            let value_obj = dict
+                .get_item("value")?
+                .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("leaf missing value"))?;
             let value = py_to_sql_value(&value_obj)?;
-            Ok(QNode::Leaf { field, lookup, value, negated })
+            Ok(QNode::Leaf {
+                field,
+                lookup,
+                value,
+                negated,
+            })
         }
         "and" => Ok(QNode::And(py_dict_children(dict)?)),
-        "or"  => Ok(QNode::Or(py_dict_children(dict)?)),
+        "or" => Ok(QNode::Or(py_dict_children(dict)?)),
         "not" => {
             let children = py_dict_children(dict)?;
-            let first = children.into_iter().next()
-                .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("NOT node has no children"))?;
+            let first = children.into_iter().next().ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err("NOT node has no children")
+            })?;
             Ok(QNode::Not(Box::new(first)))
         }
-        other => Err(pyo3::exceptions::PyValueError::new_err(format!("Unknown Q node type: {other}"))),
+        other => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Unknown Q node type: {other}"
+        ))),
     }
 }
 
 fn py_dict_children(dict: &Bound<'_, PyDict>) -> PyResult<Vec<QNode>> {
-    let children_obj = dict.get_item("children")?.ok_or_else(|| {
-        pyo3::exceptions::PyValueError::new_err("Q node missing 'children'")
-    })?;
-    let children_list = children_obj.cast::<PyList>().map_err(|_| {
-        pyo3::exceptions::PyValueError::new_err("'children' must be a list")
-    })?;
+    let children_obj = dict
+        .get_item("children")?
+        .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Q node missing 'children'"))?;
+    let children_list = children_obj
+        .cast::<PyList>()
+        .map_err(|_| pyo3::exceptions::PyValueError::new_err("'children' must be a list"))?;
     children_list.iter().map(|c| py_dict_to_qnode(&c)).collect()
 }
 
@@ -384,15 +455,25 @@ fn py_dict_children(dict: &Bound<'_, PyDict>) -> PyResult<Vec<QNode>> {
 // Type conversion: Rust → Python
 // ###
 
-fn decoded_row_to_py<'py>(py: Python<'py>, row: HashMap<String, JsonValue>) -> PyResult<Bound<'py, PyDict>> {
+fn decoded_row_to_py<'py>(
+    py: Python<'py>,
+    row: HashMap<String, JsonValue>,
+) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
-    for (k, v) in row { dict.set_item(k, json_to_py(py, &v)?)?; }
+    for (k, v) in row {
+        dict.set_item(k, json_to_py(py, &v)?)?;
+    }
     Ok(dict)
 }
 
-fn decoded_rows_to_py<'py>(py: Python<'py>, rows: Vec<HashMap<String, JsonValue>>) -> PyResult<Bound<'py, PyList>> {
+fn decoded_rows_to_py<'py>(
+    py: Python<'py>,
+    rows: Vec<HashMap<String, JsonValue>>,
+) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
-    for row in rows { list.append(decoded_row_to_py(py, row)?)?; }
+    for row in rows {
+        list.append(decoded_row_to_py(py, row)?)?;
+    }
     Ok(list)
 }
 
@@ -401,25 +482,34 @@ fn json_to_py<'py>(py: Python<'py>, v: &JsonValue) -> PyResult<Py<PyAny>> {
         JsonValue::Null => py.None(),
         JsonValue::Bool(b) => {
             let py_bool = (*b).into_pyobject(py)?;
-            <pyo3::Bound<'_, PyBool> as Clone>::clone(&py_bool).into_any().unbind()
-        },
+            <pyo3::Bound<'_, PyBool> as Clone>::clone(&py_bool)
+                .into_any()
+                .unbind()
+        }
         JsonValue::String(s) => s.into_pyobject(py)?.into_any().unbind(),
         JsonValue::Number(n) => {
-            if let Some(i) = n.as_i64() { i.into_pyobject(py)?.into_any().unbind() }
-            else if let Some(f) = n.as_f64() { f.into_pyobject(py)?.into_any().unbind() }
-            else { n.to_string().into_pyobject(py)?.into_any().unbind() }
+            if let Some(i) = n.as_i64() {
+                i.into_pyobject(py)?.into_any().unbind()
+            } else if let Some(f) = n.as_f64() {
+                f.into_pyobject(py)?.into_any().unbind()
+            } else {
+                n.to_string().into_pyobject(py)?.into_any().unbind()
+            }
         }
         JsonValue::Array(arr) => {
             let list = PyList::empty(py);
-            for item in arr { list.append(json_to_py(py, item)?)?; }
+            for item in arr {
+                list.append(json_to_py(py, item)?)?;
+            }
             list.into_any().unbind()
         }
         JsonValue::Object(map) => {
             let dict = PyDict::new(py);
-            for (k, v2) in map { dict.set_item(k, json_to_py(py, v2)?)?; }
+            for (k, v2) in map {
+                dict.set_item(k, json_to_py(py, v2)?)?;
+            }
             dict.into_any().unbind()
         }
-
     })
 }
 
@@ -438,7 +528,9 @@ impl PyTransactionHandle {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
-            if let Some(tx) = g.as_ref() { tx.commit().await.map_err(PyErr::from)?; }
+            if let Some(tx) = g.as_ref() {
+                tx.commit().await.map_err(PyErr::from)?;
+            }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
     }
@@ -447,7 +539,9 @@ impl PyTransactionHandle {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
-            if let Some(tx) = g.as_ref() { tx.rollback().await.map_err(PyErr::from)?; }
+            if let Some(tx) = g.as_ref() {
+                tx.rollback().await.map_err(PyErr::from)?;
+            }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
     }
@@ -456,7 +550,9 @@ impl PyTransactionHandle {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut g = h.lock().await;
-            if let Some(tx) = g.as_mut() { tx.savepoint(&name).await.map_err(PyErr::from)?; }
+            if let Some(tx) = g.as_mut() {
+                tx.savepoint(&name).await.map_err(PyErr::from)?;
+            }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
     }
@@ -465,7 +561,9 @@ impl PyTransactionHandle {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
-            if let Some(tx) = g.as_ref() { tx.rollback_to(&name).await.map_err(PyErr::from)?; }
+            if let Some(tx) = g.as_ref() {
+                tx.rollback_to(&name).await.map_err(PyErr::from)?;
+            }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
     }
@@ -474,10 +572,16 @@ impl PyTransactionHandle {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
-            let active = if let Some(tx) = g.as_ref() { tx.is_active().await } else { false };
+            let active = if let Some(tx) = g.as_ref() {
+                tx.is_active().await
+            } else {
+                false
+            };
             Python::attach(|py| {
                 let py_bool = active.into_pyobject(py)?;
-                Ok(<pyo3::Bound<'_, PyBool> as Clone>::clone(&py_bool).into_any().unbind())
+                Ok(<pyo3::Bound<'_, PyBool> as Clone>::clone(&py_bool)
+                    .into_any()
+                    .unbind())
             })
         })
     }
@@ -526,11 +630,17 @@ fn execute_with_params<'py>(
     sql: String,
     values: Vec<Bound<'_, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let sql_values: Vec<SqlValue> = values.iter().map(py_to_sql_value).collect::<PyResult<_>>()?;
+    let sql_values: Vec<SqlValue> = values
+        .iter()
+        .map(py_to_sql_value)
+        .collect::<PyResult<_>>()?;
     let _values = (); // Shadowing pour éviter la capture
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let compiled = compiler::CompiledQuery { sql, values: sql_values };
+        let compiled = compiler::CompiledQuery {
+            sql,
+            values: sql_values,
+        };
         let result = executor::execute(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| Ok(result.rows_affected.into_pyobject(py)?.unbind()))
     })
@@ -542,11 +652,17 @@ fn fetch_with_params<'py>(
     sql: String,
     values: Vec<Bound<'_, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let sql_values: Vec<SqlValue> = values.iter().map(py_to_sql_value).collect::<PyResult<_>>()?;
+    let sql_values: Vec<SqlValue> = values
+        .iter()
+        .map(py_to_sql_value)
+        .collect::<PyResult<_>>()?;
     let _values = ();
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let compiled = compiler::CompiledQuery { sql, values: sql_values };
+        let compiled = compiler::CompiledQuery {
+            sql,
+            values: sql_values,
+        };
         let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| Ok(decoded_rows_to_py(py, rows)?.unbind()))
     })
@@ -572,7 +688,7 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_get_active_transaction, m)?)?;
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(register_lookup, m)?)?;
-    m.add_function(wrap_pyfunction!(available_lookups,m)?)?;
+    m.add_function(wrap_pyfunction!(available_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(is_connected, m)?)?;
     m.add_function(wrap_pyfunction!(pool_stats, m)?)?;
     m.add_function(wrap_pyfunction!(raw_fetch, m)?)?;

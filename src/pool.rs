@@ -27,8 +27,8 @@
 use std::sync::OnceLock;
 
 use sqlx::{
-    any::{AnyPoolOptions, install_default_drivers},
     AnyPool,
+    any::{AnyPoolOptions, install_default_drivers},
 };
 use tracing::{debug, info};
 
@@ -96,9 +96,9 @@ impl Default for PoolConfig {
     }
 }
 
-// 
+//
 // Public API
-// 
+//
 
 /// Initialize the global connection pool.
 ///
