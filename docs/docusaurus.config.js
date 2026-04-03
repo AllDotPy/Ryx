@@ -8,7 +8,7 @@ const config = {
   favicon: 'img/favicon.ico',
 
   url: 'https://ryx.alldotpy.dev',
-  baseUrl: '/',
+  baseUrl: '/Ryx/',
 
   organizationName: 'AllDotPy',
   projectName: 'Ryx',
