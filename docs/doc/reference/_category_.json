@@ -1,0 +1,8 @@
+{
+  "label": "Reference",
+  "position": 8,
+  "link": {
+    "type": "generated-index",
+    "description": "Complete API reference, field types, lookups, exceptions, and signals."
+  }
+}

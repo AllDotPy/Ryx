@@ -1,0 +1,45 @@
+---
+sidebar_position: 4
+---
+
+# Lookup Reference
+
+All built-in lookups and their SQL translations.
+
+| Lookup | SQL | Value Transformation | Example |
+|---|---|---|---|
+| `exact` | `col = ?` | None | `filter(title="Hello")` |
+| `gt` | `col > ?` | None | `filter(views__gt=100)` |
+| `gte` | `col >= ?` | None | `filter(views__gte=100)` |
+| `lt` | `col < ?` | None | `filter(views__lt=50)` |
+| `lte` | `col <= ?` | None | `filter(views__lte=1000)` |
+| `contains` | `col LIKE ?` | Wrap with `%...%` | `filter(title__contains="Py")` |
+| `icontains` | `LOWER(col) LIKE LOWER(?)` | Wrap + lowercase | `filter(title__icontains="py")` |
+| `startswith` | `col LIKE ?` | Suffix with `%` | `filter(title__startswith="How")` |
+| `istartswith` | `LOWER(col) LIKE LOWER(?)` | Suffix + lowercase | `filter(title__istartswith="how")` |
+| `endswith` | `col LIKE ?` | Prefix with `%` | `filter(title__endswith="guide")` |
+| `iendswith` | `LOWER(col) LIKE LOWER(?)` | Prefix + lowercase | `filter(title__iendswith="Guide")` |
+| `isnull` | `col IS NULL` / `IS NOT NULL` | No bind param | `filter(body__isnull=True)` |
+| `in` | `col IN (?, ?, ...)` | Expanded from list | `filter(id__in=[1,2,3])` |
+| `range` | `col BETWEEN ? AND ?` | Two bind params | `filter(views__range=(100,1000))` |
+
+## Default Lookup
+
+When no lookup is specified, `exact` is used:
+
+```python
+Post.objects.filter(active=True)
+# Equivalent to:
+Post.objects.filter(active__exact=True)
+```
+
+## Custom Lookups
+
+Register additional lookups at runtime:
+
+```python
+import ryx
+ryx.register_lookup("ilike", "{col} ILIKE ?")
+```
+
+See [Custom Lookups](/advanced/custom-lookups) for details.

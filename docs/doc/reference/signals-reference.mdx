@@ -1,0 +1,50 @@
+---
+sidebar_position: 6
+---
+
+# Signals Reference
+
+All built-in signals with their trigger conditions and kwargs.
+
+## Lifecycle Signals
+
+| Signal | When | Kwargs |
+|---|---|---|
+| `pre_save` | Before INSERT or UPDATE | `sender`, `instance`, `created` |
+| `post_save` | After INSERT or UPDATE | `sender`, `instance`, `created` |
+| `pre_delete` | Before DELETE | `sender`, `instance` |
+| `post_delete` | After DELETE | `sender`, `instance` |
+
+## Bulk Operation Signals
+
+| Signal | When | Kwargs |
+|---|---|---|
+| `pre_update` | Before bulk `.update()` | `sender`, `queryset`, `fields` |
+| `post_update` | After bulk `.update()` | `sender`, `queryset`, `updated_count`, `fields` |
+| `pre_bulk_delete` | Before bulk `.delete()` | `sender`, `queryset` |
+| `post_bulk_delete` | After bulk `.delete()` | `sender`, `queryset`, `deleted_count` |
+
+## Kwargs Explained
+
+| Kwarg | Type | Description |
+|---|---|---|
+| `sender` | `type[Model]` | The model class |
+| `instance` | `Model` | The model instance being operated on |
+| `created` | `bool` | `True` for INSERT, `False` for UPDATE |
+| `queryset` | `QuerySet` | The queryset being operated on |
+| `fields` | `list[str]` | Fields being updated |
+| `updated_count` | `int` | Number of rows updated |
+| `deleted_count` | `int` | Number of rows deleted |
+
+## Usage
+
+```python
+from ryx import receiver, post_save
+
+@receiver(post_save, sender=Post)
+async def on_post_saved(sender, instance, created, **kwargs):
+    if created:
+        print(f"New post: {instance.title}")
+    else:
+        print(f"Updated post: {instance.title}")
+```
