@@ -6,7 +6,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 2026;
+const PORT = 2027;
 
 // Middleware pour les headers SEO et de sécurité
 app.use((req, res, next) => {

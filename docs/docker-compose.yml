@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    container_name: ryx-docs
+    ports:
+      - "2027:80"
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
