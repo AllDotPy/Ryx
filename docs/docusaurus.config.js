@@ -7,8 +7,8 @@ const config = {
   tagline: 'Django-style Python ORM. Powered by Rust.',
   favicon: 'img/favicon.ico',
 
-  url: 'https://ryx.alldotpy.dev',
-  baseUrl: '/Ryx/',
+  url: 'https://ryx.alldotpy.com',
+  baseUrl: '/',
 
   organizationName: 'AllDotPy',
   projectName: 'Ryx',
