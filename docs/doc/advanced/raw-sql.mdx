@@ -1,0 +1,64 @@
+---
+sidebar_position: 9
+---
+
+# Raw SQL
+
+When the QuerySet API isn't enough, drop down to raw SQL.
+
+## raw_fetch
+
+Execute a SELECT query and get results:
+
+```python
+from ryx.executor_helpers import raw_fetch
+
+rows = await raw_fetch("SELECT * FROM posts WHERE views > ?", [100])
+for row in rows:
+    print(row["title"], row["views"])
+```
+
+## raw_execute
+
+Execute any SQL statement:
+
+```python
+from ryx.executor_helpers import raw_execute
+
+# DDL
+await raw_execute("CREATE INDEX idx_posts_views ON posts(views)")
+
+# DML
+await raw_execute("UPDATE posts SET views = 0 WHERE views < 0")
+```
+
+## Parameterized Queries
+
+```python
+from ryx.pool_ext import fetch_with_params, execute_with_params
+
+rows = await fetch_with_params(
+    "SELECT * FROM posts WHERE author_id = ? AND active = ?",
+    [5, True],
+)
+
+await execute_with_params(
+    "INSERT INTO posts (title, slug) VALUES (?, ?)",
+    ["Hello", "hello"],
+)
+```
+
+:::warning
+Raw SQL bypasses the ORM layer — no model instances, no validation, no hooks. Use sparingly.
+:::
+
+## When to Use Raw SQL
+
+- Complex CTEs or window functions
+- Database-specific features not exposed by the ORM
+- DDL operations
+- Performance-critical queries that need hand-tuned SQL
+
+## Next Steps
+
+→ **[CLI](./cli)** — Command-line management commands

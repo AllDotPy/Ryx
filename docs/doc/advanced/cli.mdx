@@ -1,0 +1,125 @@
+---
+sidebar_position: 10
+---
+
+# CLI
+
+Ryx includes a command-line interface for common database tasks.
+
+```bash
+python -m ryx <command> [options]
+```
+
+## Commands
+
+### migrate
+
+Apply migrations to the database:
+
+```bash
+python -m ryx migrate \
+    --url postgres://user:pass@localhost/mydb \
+    --models myapp.models
+```
+
+### makemigrations
+
+Generate migration files:
+
+```bash
+python -m ryx makemigrations \
+    --models myapp.models \
+    --dir migrations/
+
+# Check mode — exit 1 if unapplied changes
+python -m ryx makemigrations --models myapp.models --check
+```
+
+### showmigrations
+
+Show migration status:
+
+```bash
+python -m ryx showmigrations \
+    --url postgres://user:pass@localhost/mydb \
+    --dir migrations/
+```
+
+### sqlmigrate
+
+Print SQL for a specific migration:
+
+```bash
+python -m ryx sqlmigrate 0001_initial --dir migrations/
+```
+
+### flush
+
+Delete all data from all tables:
+
+```bash
+python -m ryx flush \
+    --models myapp.models \
+    --url postgres://user:pass@localhost/mydb \
+    --yes
+```
+
+:::warning
+This deletes ALL data. Use `--yes` to skip the confirmation prompt.
+:::
+
+### shell
+
+Interactive Python shell with ORM pre-loaded:
+
+```bash
+python -m ryx shell \
+    --url postgres://user:pass@localhost/mydb \
+    --models myapp.models
+```
+
+### dbshell
+
+Connect to the database with the native CLI client:
+
+```bash
+python -m ryx dbshell --url postgres://user:pass@localhost/mydb
+# Opens psql
+```
+
+### inspectdb
+
+Introspect an existing database and generate model stubs:
+
+```bash
+# All tables
+python -m ryx inspectdb --url postgres://user:pass@localhost/mydb
+
+# Specific table
+python -m ryx inspectdb --url postgres://user:pass@localhost/mydb --table users
+```
+
+### version
+
+```bash
+python -m ryx version
+```
+
+## Configuration
+
+The CLI reads configuration from:
+
+1. **CLI flags** — `--url`, `--models`, `--dir`
+2. **Environment variable** — `RYX_DATABASE_URL`
+3. **Settings module** — `ryx_settings.py` in your project
+
+```python
+# ryx_settings.py
+DATABASE_URL = "postgres://user:pass@localhost/mydb"
+MODELS = ["myapp.models"]
+MIGRATIONS_DIR = "migrations/"
+```
+
+## Next Steps
+
+→ **[Reference](/reference/api-reference)** — Complete API documentation

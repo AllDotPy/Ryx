@@ -1,0 +1,108 @@
+---
+sidebar_position: 3
+---
+
+# Validation
+
+Ryx validates data at two levels: field-level (automatic) and model-level (custom).
+
+## Field-Level Validation
+
+Built into field definitions:
+
+```python
+class Product(Model):
+    name = CharField(
+        max_length=200,
+        min_length=3,
+        blank=False,
+    )
+    price = DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        min_value=0,
+        max_value=999999,
+    )
+    status = CharField(
+        max_length=20,
+        choices=["draft", "published", "archived"],
+    )
+    email = CharField(max_length=254, validators=[EmailValidator()])
+    website = CharField(max_length=200, null=True, validators=[URLValidator()])
+```
+
+## Built-in Validators
+
+| Validator | Description |
+|---|---|
+| `MaxLengthValidator(n)` | String/list length ≤ n |
+| `MinLengthValidator(n)` | String/list length ≥ n |
+| `MaxValueValidator(n)` | Value ≤ n |
+| `MinValueValidator(n)` | Value ≥ n |
+| `RangeValidator(min, max)` | Value in range |
+| `NotBlankValidator()` | Not empty string |
+| `RegexValidator(pattern)` | Matches regex |
+| `EmailValidator()` | Valid email format |
+| `URLValidator()` | Valid URL format |
+| `ChoicesValidator(values)` | Value in allowed list |
+| `NotNullValidator()` | Not None |
+| `UniqueValueValidator()` | Unique in table |
+
+## Model-Level Validation
+
+Override `clean()` for cross-field validation:
+
+```python
+class Event(Model):
+    start_date = DateTimeField()
+    end_date   = DateTimeField()
+    status     = CharField(max_length=20, choices=["draft", "published"])
+
+    async def clean(self):
+        errors = {}
+        if self.end_date and self.end_date < self.start_date:
+            errors["end_date"] = ["End date must be after start date"]
+        if self.status == "published" and not self.start_date:
+            errors["start_date"] = ["Published events need a start date"]
+        if errors:
+            raise ValidationError(errors)
+```
+
+## Running Validation
+
+```python
+product = Product(name="x", price=-1)
+
+# Manual
+try:
+    await product.full_clean()
+except ValidationError as e:
+    print(e.errors)
+    # → {
+    #     "name": ["Ensure this value has at least 3 characters."],
+    #     "price": ["Ensure this value is greater than or equal to 0."],
+    #   }
+
+# Automatic — save() calls full_clean() by default
+await product.save()  # Raises ValidationError
+
+# Skip validation (for bulk ops)
+await product.save(validate=False)
+```
+
+## Collecting All Errors
+
+`full_clean()` collects ALL errors from ALL fields before raising — you get the complete picture at once:
+
+```python
+try:
+    await product.full_clean()
+except ValidationError as e:
+    for field, errors in e.errors.items():
+        for error in errors:
+            print(f"{field}: {error}")
+```
+
+## Next Steps
+
+→ **[Signals](./signals)** — Lifecycle event observers

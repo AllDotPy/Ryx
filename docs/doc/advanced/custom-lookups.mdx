@@ -1,0 +1,76 @@
+---
+sidebar_position: 7
+---
+
+# Custom Lookups
+
+Extend Ryx's query API with your own SQL lookups.
+
+## Register a Lookup
+
+```python
+import ryx
+
+# Simple SQL template with {col} placeholder
+ryx.register_lookup("ilike", "{col} ILIKE ?")
+
+# Usage
+Post.objects.filter(title__ilike="%python%")
+```
+
+## Decorator Syntax
+
+```python
+@ryx.lookup("uuid_prefix")
+def uuid_prefix_lookup(field, value):
+    """{col}::text LIKE ?"""
+```
+
+The docstring is the SQL template.
+
+## No Bind Parameter
+
+If your lookup doesn't need a value:
+
+```python
+ryx.register_lookup("even", "{col} % 2 = 0")
+
+# Usage — no value needed
+Post.objects.filter(id__even=True)
+```
+
+## Override Built-ins
+
+Custom lookups are checked first, so you can override built-ins:
+
+```python
+# Use Postgres ILIKE instead of LOWER()...LIKE
+ryx.register_lookup("icontains", "{col} ILIKE ?")
+```
+
+## Full-Text Search Example
+
+```python
+# PostgreSQL full-text search
+ryx.register_lookup(
+    "tsearch",
+    "to_tsvector({col}) @@ plainto_tsquery(?)"
+)
+
+posts = await Post.objects.filter(body__tsearch="async programming")
+```
+
+## Available Lookups
+
+```python
+# List all registered lookups
+lookups = ryx.available_lookups()
+print(lookups)
+# → ['exact', 'gt', 'gte', 'lt', 'lte', 'contains', 'icontains',
+#    'startswith', 'istartswith', 'endswith', 'iendswith',
+#    'isnull', 'in', 'range', 'ilike', 'tsearch', 'even']
+```
+
+## Next Steps
+
+→ **[Sync/Async](./sync-async)** — Bridge between sync and async code

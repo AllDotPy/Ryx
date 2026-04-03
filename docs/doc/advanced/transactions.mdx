@@ -1,0 +1,65 @@
+---
+sidebar_position: 2
+---
+
+# Transactions
+
+Transactions ensure that a group of database operations either all succeed or all fail together.
+
+## Basic Usage
+
+```python
+import ryx
+
+async with ryx.transaction():
+    order = await Order.objects.create(total=99.99, user_id=1)
+    await OrderItem.objects.create(order_id=order.pk, sku="ABC123")
+    # Commits automatically on clean exit
+    # Rolls back automatically on exception
+```
+
+## With Explicit Handle
+
+Access the transaction handle for savepoint management:
+
+```python
+async with ryx.transaction() as tx:
+    order = await Order.objects.create(total=50.00, user_id=1)
+
+    await tx.savepoint("before_items")
+    try:
+        for item in cart_items:
+            await OrderItem.objects.create(order_id=order.pk, **item)
+    except ValidationError:
+        await tx.rollback_to("before_items")
+        raise
+```
+
+## Nested Transactions
+
+Nested `transaction()` calls create savepoints automatically:
+
+```python
+async with ryx.transaction():
+    await do_something()
+
+    async with ryx.transaction():  # Creates a SAVEPOINT
+        await do_something_else()
+        # If this raises, only the inner savepoint rolls back
+```
+
+## Check Active Transaction
+
+```python
+tx = ryx.get_active_transaction()
+if tx:
+    print("Inside a transaction")
+```
+
+## How It Works
+
+Ryx uses `contextvars.ContextVar` to propagate the active transaction through async call stacks. This means you don't need to pass the transaction object around — it's automatically available to all database operations within the context.
+
+## Next Steps
+
+→ **[Validation](./validation)** — Field and model validation

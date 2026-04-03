@@ -1,0 +1,70 @@
+---
+sidebar_position: 8
+---
+
+# Sync/Async Bridge
+
+Ryx is async-native, but provides helpers for use in synchronous environments.
+
+## run_sync
+
+Run an async ORM query from sync code:
+
+```python
+from ryx import run_sync
+
+posts = run_sync(Post.objects.filter(active=True))
+post  = run_sync(Post.objects.get(pk=1))
+count = run_sync(Post.objects.count())
+```
+
+This creates a temporary event loop, runs the query, and returns the result.
+
+## sync_to_async
+
+Wrap a blocking function for use in async code:
+
+```python
+from ryx import sync_to_async
+
+@sync_to_async
+def read_file(path):
+    with open(path) as f:
+        return f.read()
+
+content = await read_file("data.txt")
+```
+
+## async_to_sync
+
+Wrap an async function for sync callers:
+
+```python
+from ryx import async_to_sync
+
+get_post = async_to_sync(Post.objects.get)
+post = get_post(pk=42)
+```
+
+## run_async
+
+Run a sync function in a thread pool from async code:
+
+```python
+from ryx import run_async
+
+result = await run_async(some_blocking_library.call, arg1, arg2)
+```
+
+## When to Use
+
+| Scenario | Helper |
+|---|---|
+| Sync script using Ryx | `run_sync()` |
+| Async code calling blocking I/O | `sync_to_async()` |
+| Sync code calling async Ryx | `async_to_sync()` |
+| Async code calling blocking CPU work | `run_async()` |
+
+## Next Steps
+
+→ **[Raw SQL](./raw-sql)** — Escape hatch for complex queries
