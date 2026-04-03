@@ -1,0 +1,163 @@
+---
+sidebar_position: 4
+---
+
+# Query Compiler
+
+The heart of Ryx — transforms Python query expressions into optimized SQL.
+
+## Pipeline
+
+```
+Python QuerySet methods
+    │
+    ▼
+QueryNode (Rust AST)
+    │
+    ▼
+compiler::compile()
+    │
+    ▼
+CompiledQuery { sql: String, values: Vec<SqlValue> }
+```
+
+## AST Types
+
+### QueryNode
+
+The root of every query:
+
+```rust
+pub struct QueryNode {
+    pub operation: QueryOperation,  // Select, Aggregate, Count, Delete, Update, Insert
+    pub table: String,
+    pub columns: Vec<String>,
+    pub filters: Vec<FilterNode>,
+    pub q_tree: Option<QNode>,
+    pub joins: Vec<JoinClause>,
+    pub group_by: Vec<String>,
+    pub having: Vec<FilterNode>,
+    pub order_by: Vec<OrderByClause>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+    pub distinct: bool,
+}
+```
+
+### QNode — Boolean Expression Tree
+
+```rust
+pub enum QNode {
+    Leaf { field: String, lookup: String, value: SqlValue, negated: bool },
+    And { left: Box<QNode>, right: Box<QNode> },
+    Or  { left: Box<QNode>, right: Box<QNode> },
+    Not { inner: Box<QNode> },
+}
+```
+
+### SqlValue — Type-Safe Values
+
+```rust
+pub enum SqlValue {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Text(String),
+    Bytes(Vec<u8>),
+    Date(chrono::NaiveDate),
+    Time(chrono::NaiveTime),
+    DateTime(chrono::NaiveDateTime),
+    Json(serde_json::Value),
+}
+```
+
+### JoinClause
+
+```rust
+pub enum JoinKind { Inner, LeftOuter, RightOuter, FullOuter, Cross }
+
+pub struct JoinClause {
+    pub table: String,
+    pub condition: String,
+    pub kind: JoinKind,
+    pub alias: Option<String>,
+}
+```
+
+## Compilation Process
+
+1. **SELECT clause** — `columns` or `*`
+2. **FROM clause** — `table`
+3. **JOINs** — Each `JoinClause` rendered with proper kind
+4. **WHERE** — Flat `filters` AND-ed, then Q-tree recursively compiled
+5. **GROUP BY** — If `group_by` is non-empty
+6. **HAVING** — If `having` is non-empty
+7. **ORDER BY** — Each `OrderByClause` with ASC/DESC
+8. **LIMIT/OFFSET** — If set
+9. **DISTINCT** — If flag is true
+
+## Q-Tree Compilation
+
+The Q-tree is compiled recursively:
+
+```
+Q(active=True) | Q(views__gte=1000)
+
+QNode::Or {
+    left:  Leaf { field: "active", lookup: "exact", value: Bool(true) }
+    right: Leaf { field: "views", lookup: "gte", value: Int(1000) }
+}
+
+→ ("active" = ? OR "views" >= ?)
+```
+
+Nested expressions:
+
+```
+(Q(active=True) & Q(views__gte=100)) | Q(featured=True)
+
+→ (("active" = ? AND "views" >= ?) OR "featured" = ?)
+```
+
+## Lookup Compilation
+
+Each lookup generates SQL differently:
+
+```rust
+match lookup.as_str() {
+    "exact"     => format!("{col} = ?"),
+    "gt"        => format!("{col} > ?"),
+    "contains"  => { values.push(wrap_percent(value)); format!("{col} LIKE ?") }
+    "isnull"    => if value { format!("{col} IS NULL") } else { format!("{col} IS NOT NULL") }
+    "in"        => { let placeholders = expand_placeholders(values.len()); format!("{col} IN ({placeholders})") }
+    "range"     => format!("{col} BETWEEN ? AND ?"),
+    custom      => template.replace("{col}", &col),  // Custom lookup
+}
+```
+
+## Identifier Quoting
+
+All identifiers are quoted for safety:
+
+```rust
+fn quote_ident(name: &str) -> String {
+    format!("\"{}\"", name)
+}
+// "posts", "author_id", "created_at"
+```
+
+## Output
+
+```rust
+pub struct CompiledQuery {
+    pub sql: String,
+    pub values: Vec<SqlValue>,
+}
+```
+
+This is passed directly to `sqlx::query(&sql).bind(values).fetch_all(pool)`.
+
+## Next Steps
+
+→ **[Connection Pool](./connection-pool)** — Pool management

@@ -1,0 +1,121 @@
+---
+sidebar_position: 3
+---
+
+# Rust Core
+
+The compiled engine that powers Ryx. Built with PyO3, sqlx, and tokio.
+
+## Module Overview
+
+| Module | File | Responsibility |
+|---|---|---|
+| **lib.rs** | `src/lib.rs` | PyO3 entry, QueryBuilder, type bridges |
+| **errors.rs** | `src/errors.rs` | RyxError enum + PyErr conversion |
+| **pool.rs** | `src/pool.rs` | Global AnyPool singleton |
+| **executor.rs** | `src/executor.rs` | SQL execution + row decoding |
+| **transaction.rs** | `src/transaction.rs` | Transaction handle + savepoints |
+| **query/ast.rs** | `src/query/ast.rs` | Query AST types |
+| **query/compiler.rs** | `src/query/compiler.rs` | AST → SQL compilation |
+| **query/lookup.rs** | `src/query/lookup.rs` | Lookup registry |
+
+## lib.rs — Module Entry
+
+Exposes to Python:
+
+- `PyQueryBuilder` — Python-facing query builder
+- `setup_pool()` — Initialize the connection pool
+- `pool_stats()` — Get pool statistics
+- `begin_tx()`, `commit_tx()`, `rollback_tx()` — Transaction operations
+- `savepoint()`, `rollback_to()`, `release_savepoint()` — Savepoint operations
+- Type conversion: `py_to_sql_value()`, `json_to_py()`
+
+## errors.rs — Error System
+
+```rust
+#[derive(thiserror::Error, Debug)]
+pub enum RyxError {
+    #[error("Database error: {0}")]
+    Database(String),
+
+    #[error("Object does not exist")]
+    DoesNotExist,
+
+    #[error("Multiple objects returned")]
+    MultipleObjectsReturned,
+
+    #[error("Pool not initialized")]
+    PoolNotInitialized,
+
+    #[error("Pool already initialized")]
+    PoolAlreadyInitialized,
+
+    #[error("Unknown lookup: {0}")]
+    UnknownLookup(String),
+
+    #[error("Unknown field: {0}")]
+    UnknownField(String),
+
+    #[error("Type mismatch: {0}")]
+    TypeMismatch(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+```
+
+Implements `From<RyxError> for PyErr` for automatic Python exception conversion.
+
+## pool.rs — Connection Pool
+
+```rust
+static POOL: OnceLock<AnyPool> = OnceLock::new();
+
+pub struct PoolConfig {
+    pub max_connections: u32,
+    pub min_connections: u32,
+    pub connect_timeout: Duration,
+    pub idle_timeout: Duration,
+    pub max_lifetime: Duration,
+}
+```
+
+Functions: `initialize()`, `get()`, `is_initialized()`, `stats()`.
+
+## executor.rs — SQL Execution
+
+```rust
+pub async fn fetch_all(query: CompiledQuery) -> Result<Vec<HashMap<String, JsonValue>>>
+pub async fn fetch_count(query: CompiledQuery) -> Result<i64>
+pub async fn fetch_one(query: CompiledQuery) -> Result<HashMap<String, JsonValue>>
+pub async fn execute(query: CompiledQuery) -> Result<MutationResult>
+```
+
+Transaction-aware: checks for active tx before using pool.
+
+## transaction.rs — Transaction Management
+
+```rust
+pub struct TransactionHandle {
+    tx: Transaction<Any>,
+    savepoints: Vec<String>,
+}
+```
+
+Global `ACTIVE_TX` OnceCell for context propagation.
+
+## Dependencies
+
+| Crate | Version | Role |
+|---|---|---|
+| `pyo3` | `>=0.27.2, <0.29` | Python ↔ Rust bindings |
+| `pyo3-async-runtimes` | `0.28` | Rust futures → Python awaitables |
+| `sqlx` | `0.8.6` | Async SQL driver |
+| `tokio` | `1.40` | Async runtime |
+| `thiserror` | `2` | Error derivation |
+| `serde_json` | — | JSON value handling |
+| `tracing` | — | Structured logging |
+
+## Next Steps
+
+→ **[Query Compiler](./query-compiler)** — How AST becomes SQL

@@ -1,0 +1,92 @@
+---
+sidebar_position: 6
+---
+
+# Type Conversion
+
+Ryx bridges Python and SQL types through a two-way conversion system at the PyO3 boundary.
+
+## Python → SQL
+
+```rust
+fn py_to_sql_value(value: &Bound<'_, PyAny>) -> PyResult<SqlValue>
+```
+
+Maps Python types to SQL-safe variants:
+
+| Python | SQL |
+|---|---|
+| `None` | `SqlValue::Null` |
+| `bool` | `SqlValue::Bool` |
+| `int` | `SqlValue::Int` |
+| `float` | `SqlValue::Float` |
+| `str` | `SqlValue::Text` |
+| `bytes` | `SqlValue::Bytes` |
+| `datetime.date` | `SqlValue::Date` |
+| `datetime.time` | `SqlValue::Time` |
+| `datetime.datetime` | `SqlValue::DateTime` |
+| `dict` / `list` | `SqlValue::Json` |
+
+## SQL → Python
+
+```rust
+fn json_to_py(value: JsonValue, py: Python) -> PyResult<PyObject>
+```
+
+Maps decoded SQL values back to Python objects:
+
+| SQL | Python |
+|---|---|
+| `NULL` | `None` |
+| `BOOLEAN` | `bool` |
+| `INTEGER` | `int` |
+| `DOUBLE` | `float` |
+| `TEXT` | `str` |
+| `BYTEA` | `bytes` |
+| `DATE` | `datetime.date` |
+| `TIME` | `datetime.time` |
+| `TIMESTAMP` | `datetime.datetime` |
+| `JSONB` | `dict` / `list` |
+
+## Row Decoding
+
+The executor decodes `AnyRow` column-by-column:
+
+```rust
+fn decode_row(row: &AnyRow) -> HashMap<String, JsonValue> {
+    let mut map = HashMap::new();
+    for column in row.columns() {
+        let name = column.name().to_string();
+        let value = decode_value(row, &name);  // Type-specific decode
+        map.insert(name, value);
+    }
+    map
+}
+```
+
+The `HashMap<String, JsonValue>` is then converted to a `PyDict` at the PyO3 boundary — a single GIL operation instead of one per column.
+
+## Field-Level Conversion
+
+Python fields also perform type conversion:
+
+```python
+class DateTimeField(Field):
+    def to_python(self, value):
+        """Convert DB value to Python datetime."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        return datetime.fromisoformat(str(value))
+
+    def to_db(self, value):
+        """Convert Python value to DB format."""
+        if value is None:
+            return None
+        return value.isoformat()
+```
+
+## Next Steps
+
+→ **[Cookbook](/cookbook/blog-tutorial)** — Real-world tutorials
