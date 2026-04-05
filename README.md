@@ -119,7 +119,7 @@ Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded b
 
 ## Documentation
 
-Full documentation with guides, API reference, and examples: **[docs](docs/)**
+Full documentation with guides, API reference, and examples: **[docs](https://ryx.alldotpy.com)**
 
 ## Contributing
 
