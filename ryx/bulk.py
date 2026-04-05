@@ -255,6 +255,7 @@ async def bulk_update(
     }
     total = 0
 
+    from ryx import ryx_core as _core
     from ryx.pool_ext import execute_with_params
 
     for batch in _chunked(instances, batch_size):
@@ -268,9 +269,8 @@ async def bulk_update(
         table = model._meta.table_name
 
         # Build CASE WHEN clauses.
-        # Integers (PKs + IntField values) are inlined directly in the SQL
-        # to avoid the FFI conversion overhead of py_to_sql_value() for
-        # every single parameter. Only non-integer values use placeholders.
+        # Strategy: inline integers directly in SQL (zero FFI cost),
+        # use ? placeholders only for non-integer values.
         case_clauses = []
         all_values = []
 
@@ -282,11 +282,11 @@ async def bulk_update(
             case_parts = [f'"{col}" = CASE "{pk_col}"']
             for inst in valid:
                 val = fobj.to_db(getattr(inst, fname))
-                # Inline integers directly — safe from SQL injection
                 if isinstance(val, int) and not isinstance(val, bool):
+                    # Inline integers — zero FFI overhead
                     case_parts.append(f"WHEN {inst.pk} THEN {val}")
                 else:
-                    case_parts.append(f"WHEN ? THEN ?")
+                    case_parts.append("WHEN ? THEN ?")
                     all_values.append(inst.pk)
                     all_values.append(val)
             case_parts.append("END")
@@ -295,8 +295,7 @@ async def bulk_update(
         if not case_clauses:
             continue
 
-        # Build the full SQL
-        # Inline remaining integer PKs in WHERE IN clause when possible
+        # WHERE IN — inline integer PKs
         pk_parts = []
         for pk in pks:
             if isinstance(pk, int):

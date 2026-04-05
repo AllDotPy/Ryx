@@ -719,6 +719,89 @@ fn bulk_delete<'py>(
     })
 }
 
+/// Bulk update using CASE WHEN in a single FFI call.
+///
+/// Builds a single UPDATE statement with CASE WHEN clauses:
+///   UPDATE "table" SET
+///       "col1" = CASE "pk" WHEN 1 THEN ? WHEN 2 THEN ? END,
+///       "col2" = CASE "pk" WHEN 1 THEN ? WHEN 2 THEN ? END
+///   WHERE "pk" IN (?, ?, ...)
+///
+/// All values are passed as a flat list: [pk1, val1, pk2, val2, ..., pk1, pk2, ...]
+/// where the first N*F values are the CASE WHEN pairs (N rows × F fields)
+/// and the last N values are the WHERE IN clause.
+#[pyfunction]
+fn bulk_update<'py>(
+    py: Python<'py>,
+    table: String,
+    pk_col: String,
+    // List of (column_name, list_of_values) tuples
+    // Each list_of_values has the same length as pks
+    columns: Vec<(String, Vec<Bound<'_, PyAny>>)>,
+    pks: Vec<Bound<'_, PyAny>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    // Convert PKs to integers (fast path)
+    let pk_list = PyList::new(py, pks.clone())?;
+    let pk_values = py_int_list_to_sql_values(&pk_list)?;
+
+    // Convert all field values
+    let mut field_values: Vec<Vec<SqlValue>> = Vec::with_capacity(columns.len());
+    let mut col_names: Vec<String> = Vec::with_capacity(columns.len());
+    for (col_name, vals) in columns {
+        let sql_vals: Vec<SqlValue> = vals
+            .iter()
+            .map(|v| py_to_sql_value(v))
+            .collect::<PyResult<_>>()?;
+        field_values.push(sql_vals);
+        col_names.push(col_name);
+    }
+
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let n = pk_values.len();
+        let f = field_values.len();
+
+        // Build CASE WHEN clauses
+        let mut case_clauses = Vec::with_capacity(f);
+        let mut all_values = Vec::with_capacity(n * f * 2 + n);
+
+        for (fi, col_name) in col_names.iter().enumerate() {
+            let mut case_parts = Vec::with_capacity(n * 3 + 2);
+            case_parts.push(format!("\"{}\" = CASE \"{}\"", col_name, pk_col));
+            for i in 0..n {
+                case_parts.push("WHEN ? THEN ?".to_string());
+                all_values.push(pk_values[i].clone());
+                all_values.push(field_values[fi][i].clone());
+            }
+            case_parts.push("END".to_string());
+            case_clauses.push(case_parts.join(" "));
+        }
+
+        // WHERE IN clause
+        let pk_placeholders: Vec<String> = (0..n).map(|_| "?".to_string()).collect();
+        for pk in &pk_values {
+            all_values.push(pk.clone());
+        }
+
+        let sql = format!(
+            "UPDATE \"{}\" SET {} WHERE \"{}\" IN ({})",
+            table,
+            case_clauses.join(", "),
+            pk_col,
+            pk_placeholders.join(", ")
+        );
+
+        let compiled = compiler::CompiledQuery {
+            sql,
+            values: all_values,
+        };
+        let result = executor::execute(compiled).await.map_err(PyErr::from)?;
+        Python::attach(|py| {
+            let n = (result.rows_affected as i64).into_pyobject(py)?;
+            Ok(n.unbind())
+        })
+    })
+}
+
 // ###
 // Module definition
 // ###
@@ -746,6 +829,7 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(execute_with_params, m)?)?;
     m.add_function(wrap_pyfunction!(fetch_with_params, m)?)?;
     m.add_function(wrap_pyfunction!(bulk_delete, m)?)?;
+    m.add_function(wrap_pyfunction!(bulk_update, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }
