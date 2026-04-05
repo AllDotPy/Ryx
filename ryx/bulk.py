@@ -92,9 +92,14 @@ async def bulk_create(
     if not col_names:
         return list(instances)
 
+    pk_field = model._meta.pk_field
+
     # Process in batches
     for batch in _chunked(instances, batch_size):
-        await _insert_batch(model, batch, fields, col_names, ignore_conflicts)
+        pks = await _insert_batch(model, batch, fields, col_names, ignore_conflicts)
+        # Assign returned PKs to instances
+        for inst, pk in zip(batch, pks):
+            object.__setattr__(inst, pk_field.attname, pk)
 
     return list(instances)
 
@@ -105,8 +110,12 @@ async def _insert_batch(
     fields: list,
     col_names: list,
     ignore_conflicts: bool,
-) -> None:
-    """Execute a single multi-row INSERT for one batch."""
+) -> list:
+    """Execute a single multi-row INSERT for one batch.
+
+    Returns the list of assigned PKs (from RETURNING clause).
+    """
+    from ryx.pool_ext import fetch_with_params
 
     # Build quoted column list
     quoted_cols = ", ".join(f'"{c}"' for c in col_names)
@@ -121,37 +130,22 @@ async def _insert_batch(
 
     values_sql = ", ".join(row_placeholders)
 
-    # Conflict handling prefix/suffix
+    # Conflict handling prefix
     if ignore_conflicts:
-        # We detect backend by checking the URL (rough heuristic)
-        # For now use the most compatible syntax
         insert_kw = "INSERT OR IGNORE INTO"  # SQLite
     else:
         insert_kw = "INSERT INTO"
 
-    sql = f'{insert_kw} "{model._meta.table_name}" ({quoted_cols}) VALUES {values_sql}'
+    pk_field = model._meta.pk_field
+    pk_col = pk_field.column if pk_field else "id"
+    sql = (
+        f'{insert_kw} "{model._meta.table_name}" ({quoted_cols}) '
+        f'VALUES {values_sql} RETURNING "{pk_col}"'
+    )
 
-    # Use the raw executor via a QueryBuilder-style approach
-    # We build a CompiledQuery manually and push it through the executor
-    await _execute_raw_with_params(sql, all_values)
-
-
-async def _execute_raw_with_params(sql: str, values: list) -> None:
-    """Execute a SQL string with positional parameters via the pool."""
-
-    # Build a temporary QueryBuilder that executes raw SQL.
-    # We abuse execute_insert with a specially crafted node — actually we
-    # use the executor directly by calling raw_execute for param-less SQL
-    # or a direct pool execute for parameterized SQL.
-    #
-    # Since raw_execute in executor_helpers only handles no-param SQL, and our
-    # bulk INSERT has params, we use the QueryBuilder execute_update pathway
-    # with a pre-built SQL string. The cleanest way is a direct pool query.
-    #
-    # We implement this by using a Python-side async bridge to the Rust pool.
-    from ryx.pool_ext import execute_with_params
-
-    await execute_with_params(sql, values)
+    # Fetch returned IDs
+    rows = await fetch_with_params(sql, all_values)
+    return [row[pk_col] for row in rows if pk_col in row]
 
 
 ####    bulk_update
