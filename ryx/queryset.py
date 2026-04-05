@@ -488,24 +488,49 @@ class QuerySet:
                 f"QuerySet indices must be integers or slices, not {type(key).__name__}"
             )
 
-    def stream(self, *, chunk_size: int = 100):
-        """Async generator that yields model instances in chunks.
+    def stream(
+        self,
+        *,
+        chunk_size: int = 100,
+        keyset: Optional[str] = None,
+        as_dict: bool = False,
+    ):
+        """Async generator that yields model instances (or dicts) in chunks.
 
-        Keeps memory usage bounded by fetching ``chunk_size`` rows at a time
-        using LIMIT/OFFSET pagination.
+        Keeps memory usage bounded by fetching ``chunk_size`` rows at a time.
 
-        Usage::
-
-            async for post in Post.objects.filter(active=True).stream(chunk_size=50):
-                process(post)
+        By default uses LIMIT/OFFSET pagination.  For large tables, pass
+        ``keyset="id"`` (or any indexed column) to use cursor-based pagination
+        which avoids the O(n²) scan degradation of OFFSET.
 
         Args:
             chunk_size: Number of rows per DB fetch. Default: 100.
+            keyset:     Column name for cursor-based pagination (e.g. "id").
+                        Uses ``WHERE col > last_value ORDER BY col ASC``.
+                        The column should be indexed for best performance.
+            as_dict:    If True, yields raw dicts instead of model instances.
+                        Much faster for ETL pipelines that don't need models.
+
+        Usage::
+
+            # Simple streaming (LIMIT/OFFSET)
+            async for post in Post.objects.filter(active=True).stream():
+                process(post)
+
+            # Cursor-based streaming for large tables
+            async for post in Post.objects.order_by("id").stream(keyset="id"):
+                process(post)
+
+            # Raw dicts for ETL
+            async for row in Post.objects.stream(as_dict=True):
+                etl_pipeline(row)
 
         Yields:
-            Model instances one at a time.
+            Model instances (default) or dicts (as_dict=True).
         """
-        return _stream_queryset(self, chunk_size=chunk_size)
+        return _stream_queryset(
+            self, chunk_size=chunk_size, keyset=keyset, as_dict=as_dict
+        )
 
     def using(self, alias: str) -> "QuerySet":
         """Stub for multi-database routing (planned feature)."""
@@ -837,20 +862,72 @@ def _apply_q_node(builder, node: dict):
 
 
 ####    Streaming helper
-async def _stream_queryset(queryset, *, chunk_size: int = 100):
-    """Async generator that yields model instances in chunks.
+async def _stream_queryset(
+    queryset,
+    *,
+    chunk_size: int = 100,
+    keyset: Optional[str] = None,
+    as_dict: bool = False,
+):
+    """Async generator that yields model instances or dicts in chunks.
 
-    Keeps memory usage bounded by fetching ``chunk_size`` rows at a time
-    using LIMIT/OFFSET pagination.
+    Supports two pagination strategies:
+    - LIMIT/OFFSET (default): simple but O(n²) for large tables
+    - Keyset/cursor-based: O(n) but requires an indexed column
     """
-    offset = 0
-    while True:
-        batch_qs = queryset.limit(chunk_size).offset(offset)
-        batch = await batch_qs
-        if not batch:
-            break
-        for instance in batch:
-            yield instance
-        if len(batch) < chunk_size:
-            break
-        offset += chunk_size
+    model = queryset._model
+
+    if keyset:
+        # Keyset pagination: WHERE keyset > last_value ORDER BY keyset ASC
+        # This is O(n) regardless of table size because the DB uses the index
+        last_value = None
+        while True:
+            qs = queryset.limit(chunk_size)
+            if last_value is not None:
+                qs = qs.filter(**{f"{keyset}__gt": last_value})
+            batch = await qs
+            if not batch:
+                break
+            for item in batch:
+                if as_dict:
+                    yield (
+                        item
+                        if isinstance(item, dict)
+                        else {
+                            f.attname: getattr(item, f.attname)
+                            for f in model._meta.fields.values()
+                        }
+                    )
+                else:
+                    yield item
+                # Track the last keyset value for the next chunk
+                last_value = (
+                    getattr(item, keyset, None)
+                    if not isinstance(item, dict)
+                    else item.get(keyset)
+                )
+            if len(batch) < chunk_size:
+                break
+    else:
+        # LIMIT/OFFSET pagination
+        offset = 0
+        while True:
+            batch_qs = queryset.limit(chunk_size).offset(offset)
+            batch = await batch_qs
+            if not batch:
+                break
+            for item in batch:
+                if as_dict:
+                    yield (
+                        item
+                        if isinstance(item, dict)
+                        else {
+                            f.attname: getattr(item, f.attname)
+                            for f in model._meta.fields.values()
+                        }
+                    )
+                else:
+                    yield item
+            if len(batch) < chunk_size:
+                break
+            offset += chunk_size
