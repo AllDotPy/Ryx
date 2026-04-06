@@ -73,22 +73,33 @@ class ShellCommand(Command):
         use_ipython = getattr(args, "ipython", False)
 
         if use_ipython:
-            try:
-                import IPython
-
-                IPython.start_ipython(argv=[], user_ns=ns, display_banner=False)
-                print(banner)
-            except Exception:
+            started = self._start_ipython(ns, banner)
+            if not started:
                 import code
 
                 code.interact(banner=banner, local=ns)
         else:
-            # Use standard Python shell to avoid event loop conflicts
+            # Use standard Python shell
             import code
 
             code.interact(banner=banner, local=ns)
 
         return 0
+
+    def _start_ipython(self, ns: dict, banner: str) -> bool:
+        """Start IPython shell using a method that avoids event loop conflicts."""
+        try:
+            from IPython.terminal.interactiveshell import TerminalInteractiveShell
+
+            shell = TerminalInteractiveShell.instance()
+            shell.user_ns.update(ns)
+            shell.banner1 = banner
+            shell.interact()
+            return True
+        except ImportError:
+            return False
+        except Exception:
+            return False
 
     async def _execute_query(self, query: str, ns: dict, banner: str) -> int:
         """Execute a query in non-interactive mode."""
