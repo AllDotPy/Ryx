@@ -45,8 +45,6 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "aiosqlite>=0.22.1",
-    "greenlet>=3.3.2",
     "ipython>=8.0.0",  # for the `ryx inspect` REPL
 ]
 
