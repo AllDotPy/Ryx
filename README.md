@@ -13,7 +13,7 @@
   <a href="https://pypi.org/project/ryx/"><img src="https://img.shields.io/pypi/dm/ryx?style=for-the-badge&logo=pypi&logoColor=white&label=downloads" alt="PyPI Downloads" /></a>
   <!-- <a href="https://pepy.tech/projects/ryx"><img src="https://static.pepy.tech/badge/ryx?style=for-the-badge" alt="Total Downloads" /></a> -->
   <a href="https://github.com/AllDotPy/Ryx/releases"><img src="https://img.shields.io/badge/v0.1.0--beta-orange?style=for-the-badge" alt="Version" /></a>
-  <a href="https://github.com/AllDotPy/Ryx/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-green?style=for-the-badge" alt="License" /></a>
+  <a href="https://github.com/AllDotPy/Ryx/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=for-the-badge" alt="License" /></a>
   <a href="https://github.com/rust-lang/rust"><img src="https://img.shields.io/badge/rust-1.83%2B-orange?style=for-the-badge&logo=rust" alt="Rust 1.83+" /></a>
 </p>
 
@@ -150,4 +150,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, architecture detai
 
 ## License
 
-Python code: AGPL-3.0 · Rust code: MIT OR Apache-2.0
+Python code: MIT · Rust code: MIT OR Apache-2.0

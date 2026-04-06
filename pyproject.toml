@@ -23,7 +23,7 @@ version = "0.1.2"
 description = "A Django-style Python ORM powered by sqlx (Rust) via PyO3."
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "AGPL-3.0"}
+license = {text = "MIT"}
 keywords = ["ORM", "Django", "sqlx", "database", "python", "performance", "rust"]
 authors = [
     {name = "Wilfried Goeh", email = "einswilligoeh@email.com"},
@@ -33,7 +33,7 @@ maintainers = [{ name = "#Einswilli", email = "einswilligoeh@email.com" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Rust",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
