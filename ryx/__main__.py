@@ -153,6 +153,11 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="QUERY",
         help="Execute query and exit (non-interactive)",
     )
+    sh.add_argument(
+        "--ipython",
+        action="store_true",
+        help="Use IPython (default: use standard Python shell)",
+    )
     sh.add_argument("--notebook", action="store_true", help="Launch Jupyter notebook")
     sh.set_defaults(func=cmd_shell)
 

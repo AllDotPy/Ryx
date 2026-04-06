@@ -29,6 +29,11 @@ class ShellCommand(Command):
             help="Execute a query and print results (non-interactive)",
         )
         parser.add_argument(
+            "--ipython",
+            action="store_true",
+            help="Use IPython if available (default: use standard Python shell)",
+        )
+        parser.add_argument(
             "--notebook",
             action="store_true",
             help="Launch Jupyter notebook instead of shell",
@@ -64,12 +69,21 @@ class ShellCommand(Command):
 
         banner += "\nType 'exit()' or Ctrl-D to quit.\n"
 
-        try:
-            import IPython
+        # Use IPython only if explicitly requested
+        use_ipython = getattr(args, "ipython", False)
 
-            IPython.start_ipython(argv=[], user_ns=ns, display_banner=False)
-            print(banner)
-        except ImportError:
+        if use_ipython:
+            try:
+                import IPython
+
+                IPython.start_ipython(argv=[], user_ns=ns, display_banner=False)
+                print(banner)
+            except Exception:
+                import code
+
+                code.interact(banner=banner, local=ns)
+        else:
+            # Use standard Python shell to avoid event loop conflicts
             import code
 
             code.interact(banner=banner, local=ns)
