@@ -1,0 +1,32 @@
+# Example ryx configuration file (TOML format)
+# Copy to ryx.toml in your project root
+
+[database]
+url = "sqlite:///dev.db"
+
+[database.pool]
+max_connections = 5
+min_connections = 1
+connect_timeout = 10
+idle_timeout = 300
+max_lifetime = 900
+
+[debug]
+verbose = true
+
+# Environment-specific configs:
+# Use --env prod to activate the [prod] section
+# Values in environment sections override base values
+
+[dev]
+database.url = "sqlite:///dev.db"
+debug.verbose = true
+
+[test]
+database.url = "sqlite:///test.db"
+database.pool.max_connections = 2
+
+[prod]
+database.url = "postgres://user:pass@prod-server/mydb"
+database.pool.max_connections = 20
+database.pool.min_connections = 5

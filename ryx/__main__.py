@@ -14,10 +14,11 @@ Commands:
   version           Print ryx version
   inspectdb         Introspect an existing database and print model stubs
 
-Configuration is read from (in order):
-  1. CLI flags (--url, --settings)
-  2. RYX_DATABASE_URL environment variable
-  3. ryx_settings.py in the current directory
+Configuration is read from (in order of precedence):
+  1. CLI flags (--url, --settings, --config, --env)
+  2. Config file (ryx.yaml/yml/toml if --config specified or in current dir)
+  3. RYX_DATABASE_URL environment variable
+  4. ryx_settings.py in the current directory
 
 Usage examples:
   python -m ryx migrate --url postgres://user:pass@localhost/mydb
@@ -25,6 +26,7 @@ Usage examples:
   python -m ryx shell --url sqlite:///dev.db
   python -m ryx showmigrations
   python -m ryx version
+  python -m ryx --config ryx.toml --env prod migrate
 """
 
 from __future__ import annotations
@@ -70,6 +72,18 @@ def _build_parser() -> argparse.ArgumentParser:
         "-s",
         metavar="MODULE",
         help="Python module with ryx settings (default: ryx_settings)",
+    )
+    p.add_argument(
+        "--config",
+        "-c",
+        metavar="FILE",
+        help="Path to config file (ryx.yaml, ryx.yml, ryx.toml)",
+    )
+    p.add_argument(
+        "--env",
+        metavar="ENV",
+        choices=["dev", "test", "prod"],
+        help="Environment name for multi-env config (dev/test/prod)",
     )
 
     sub = p.add_subparsers(title="commands", dest="command")
