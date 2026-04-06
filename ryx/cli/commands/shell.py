@@ -43,8 +43,9 @@ class ShellCommand(Command):
 
         if url:
             import ryx as _ryx
+            from ryx.queryset import run_sync
 
-            await _ryx.setup(url)
+            run_sync(_ryx.setup(url))
             ns["ryx"] = _ryx
             banner += f"Connected to: {self._mask_url(url)}\n"
 
@@ -90,7 +91,6 @@ class ShellCommand(Command):
 
     async def _eval_query(self, query: str, ns: dict):
         """Eval the query in the context of the shell namespace."""
-        # Simple eval - could be enhanced with proper QuerySet handling
         code = compile(query, "<query>", "eval")
         return eval(code, ns)
 
@@ -106,7 +106,6 @@ class ShellCommand(Command):
         return re.sub(r"(:)[^:@/]+(@)", r"\1***\2", url)
 
 
-# Legacy function for backward compatibility
 async def cmd_shell(args) -> None:
     cmd = ShellCommand()
     await cmd.execute(args)
