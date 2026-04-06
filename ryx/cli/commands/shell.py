@@ -31,7 +31,7 @@ class ShellCommand(Command):
         parser.add_argument(
             "--ipython",
             action="store_true",
-            help="Use IPython if available (default: use standard Python shell)",
+            help="Use IPython with full features (syntax highlighting, completions)",
         )
         parser.add_argument(
             "--notebook",
@@ -44,73 +44,72 @@ class ShellCommand(Command):
         url = self._resolve_url(args, config)
 
         banner = "ryx ORM interactive shell\n"
-        ns: dict = {}
 
         if url:
-            import ryx as _ryx
-            from ryx.queryset import run_sync
-
-            run_sync(_ryx.setup(url))
-            ns["ryx"] = _ryx
             banner += f"Connected to: {self._mask_url(url)}\n"
 
         models_module = getattr(args, "models", None)
         if models_module:
-            try:
-                mod = importlib.import_module(models_module)
-                ns.update({k: v for k, v in vars(mod).items() if not k.startswith("_")})
-                banner += f"Models loaded from: {models_module}\n"
-            except ImportError as e:
-                banner += f"Warning: could not load models ({e})\n"
-
-        # Handle query mode (non-interactive)
-        if getattr(args, "query", None):
-            return await self._execute_query(args.query, ns, banner)
+            banner += f"Models loaded from: {models_module}\n"
 
         banner += "\nType 'exit()' or Ctrl-D to quit.\n"
 
-        # Use IPython only if explicitly requested
         use_ipython = getattr(args, "ipython", False)
 
         if use_ipython:
-            started = self._start_ipython(ns, banner)
-            if not started:
-                import code
-
-                code.interact(banner=banner, local=ns)
+            # Run IPython in a new process to completely avoid asyncio event loop issues
+            self._run_ipython_subprocess(url, banner)
         else:
-            # Use standard Python shell
             import code
 
-            code.interact(banner=banner, local=ns)
+            code.interact(banner=banner, local={})
 
         return 0
 
-    def _start_ipython(self, ns: dict, banner: str) -> bool:
-        """Start IPython shell with full features (syntax highlighting, completions)."""
+    def _run_ipython_subprocess(self, url: str, banner: str) -> None:
+        """Run IPython in a subprocess - completely avoids asyncio event loop issues."""
+        import subprocess
+        import os
+        import sys
+
+        code = f"""
+import asyncio
+
+# Set up asyncio policy
+try:
+    asyncio.set_event_loop_policy(asyncio.DefaultEventLoopPolicy())
+except:
+    pass
+
+# Import and setup ryx
+from ryx import setup
+from ryx.queryset import run_sync
+
+if {repr(url)}:
+    run_sync(setup({repr(url)}))
+
+# Setup IPython with full features
+from IPython.terminal.interactiveshell import TerminalInteractiveShell
+
+shell = TerminalInteractiveShell.instance(
+    banner1={repr(banner)},
+    colors="Linux",
+)
+
+# Make ryx available
+import ryx
+shell.user_ns["ryx"] = ryx
+
+shell.interact()
+"""
+
         try:
-            from IPython.core.interactiveshell import InteractiveShell
-            from IPython.terminal.interactiveshell import TerminalInteractiveShell
-
-            # Create a fresh IPython shell instance with full configuration
-            shell = TerminalInteractiveShell.instance(
-                banner1=banner,
-                banner2="",
-                colors="Linux",  # Enable syntax highlighting
+            subprocess.run(
+                [sys.executable, "-c", code],
+                env={k: v for k, v in os.environ.items() if k != "PYTHONPATH"},
             )
-
-            # Update namespace with ryx and models
-            shell.user_ns.update(ns)
-
-        except ImportError:
-            return False
         except Exception as e:
-            print(f"[WARNING] IPython failed to start: {e}", file=sys.stderr)
-            return False
-
-        # Start the interactive loop
-        shell.interact()
-        return True
+            print(f"[WARNING] IPython failed: {e}", file=sys.stderr)
 
     async def _execute_query(self, query: str, ns: dict, banner: str) -> int:
         """Execute a query in non-interactive mode."""
