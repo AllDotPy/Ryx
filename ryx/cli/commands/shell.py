@@ -87,19 +87,30 @@ class ShellCommand(Command):
         return 0
 
     def _start_ipython(self, ns: dict, banner: str) -> bool:
-        """Start IPython shell using a method that avoids event loop conflicts."""
+        """Start IPython shell with full features (syntax highlighting, completions)."""
         try:
+            from IPython.core.interactiveshell import InteractiveShell
             from IPython.terminal.interactiveshell import TerminalInteractiveShell
 
-            shell = TerminalInteractiveShell.instance()
+            # Create a fresh IPython shell instance with full configuration
+            shell = TerminalInteractiveShell.instance(
+                banner1=banner,
+                banner2="",
+                colors="Linux",  # Enable syntax highlighting
+            )
+
+            # Update namespace with ryx and models
             shell.user_ns.update(ns)
-            shell.banner1 = banner
-            shell.interact()
-            return True
+
         except ImportError:
             return False
-        except Exception:
+        except Exception as e:
+            print(f"[WARNING] IPython failed to start: {e}", file=sys.stderr)
             return False
+
+        # Start the interactive loop
+        shell.interact()
+        return True
 
     async def _execute_query(self, query: str, ns: dict, banner: str) -> int:
         """Execute a query in non-interactive mode."""
