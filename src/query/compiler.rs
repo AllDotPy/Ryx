@@ -12,6 +12,7 @@
 // ###
 
 use crate::errors::{RyxError, RyxResult};
+use crate::pool::Backend;
 use crate::query::ast::{
     AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, QNode, QueryNode, QueryOperation,
     SortDirection, SqlValue,
@@ -103,7 +104,8 @@ fn compile_select(
     }
 
     // # WHERE
-    let where_sql = compile_where_combined(&node.filters, node.q_filter.as_ref(), values)?;
+    let where_sql =
+        compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
@@ -123,7 +125,7 @@ fn compile_select(
 
     // # HAVING
     if !node.having.is_empty() {
-        let having = compile_filters(&node.having, values)?;
+        let having = compile_filters(&node.having, values, node.backend)?;
         sql.push_str(" HAVING ");
         sql.push_str(&having);
     }
@@ -164,7 +166,8 @@ fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<
         sql.push_str(&compile_joins(&node.joins));
     }
 
-    let where_sql = compile_where_combined(&node.filters, node.q_filter.as_ref(), values)?;
+    let where_sql =
+        compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
@@ -177,13 +180,18 @@ fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<
 // COUNT
 // ###
 
+// ###
+// COUNT
+// ###
+
 fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
     let mut sql = format!("SELECT COUNT(*) FROM {}", quote_col(&node.table));
     if !node.joins.is_empty() {
         sql.push(' ');
         sql.push_str(&compile_joins(&node.joins));
     }
-    let where_sql = compile_where_combined(&node.filters, node.q_filter.as_ref(), values)?;
+    let where_sql =
+        compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
@@ -197,7 +205,8 @@ fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<Stri
 
 fn compile_delete(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
     let mut sql = format!("DELETE FROM {}", quote_col(&node.table));
-    let where_sql = compile_where_combined(&node.filters, node.q_filter.as_ref(), values)?;
+    let where_sql =
+        compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
@@ -225,7 +234,8 @@ fn compile_update(
         })
         .collect();
     let mut sql = format!("UPDATE {} SET {}", quote_col(&node.table), set.join(", "));
-    let where_sql = compile_where_combined(&node.filters, node.q_filter.as_ref(), values)?;
+    let where_sql =
+        compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
     if !where_sql.is_empty() {
         sql.push_str(" WHERE ");
         sql.push_str(&where_sql);
@@ -355,14 +365,15 @@ fn compile_where_combined(
     filters: &[FilterNode],
     q: Option<&QNode>,
     values: &mut Vec<SqlValue>,
+    backend: Backend,
 ) -> RyxResult<String> {
     let flat = if filters.is_empty() {
         None
     } else {
-        Some(compile_filters(filters, values)?)
+        Some(compile_filters(filters, values, backend)?)
     };
     let qtree = if let Some(q) = q {
-        Some(compile_q(q, values)?)
+        Some(compile_q(q, values, backend)?)
     } else {
         None
     };
@@ -382,30 +393,30 @@ fn compile_where_combined(
 ///
 /// Design: we emit minimal parentheses — each non-leaf node wraps its children
 /// in parens only when necessary (AND inside OR must be parenthesised).
-fn compile_q(q: &QNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
+fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> RyxResult<String> {
     match q {
         QNode::Leaf {
             field,
             lookup,
             value,
             negated,
-        } => compile_single_filter(field, lookup, value, *negated, values),
+        } => compile_single_filter(field, lookup, value, *negated, values, backend),
         QNode::And(children) => {
             let parts: Vec<String> = children
                 .iter()
-                .map(|c| compile_q(c, values))
+                .map(|c| compile_q(c, values, backend))
                 .collect::<RyxResult<_>>()?;
             Ok(format!("({})", parts.join(" AND ")))
         }
         QNode::Or(children) => {
             let parts: Vec<String> = children
                 .iter()
-                .map(|c| compile_q(c, values))
+                .map(|c| compile_q(c, values, backend))
                 .collect::<RyxResult<_>>()?;
             Ok(format!("({})", parts.join(" OR ")))
         }
         QNode::Not(child) => {
-            let inner = compile_q(child, values)?;
+            let inner = compile_q(child, values, backend)?;
             Ok(format!("NOT ({inner})"))
         }
     }
@@ -415,10 +426,14 @@ fn compile_q(q: &QNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
 // Flat filter list compiler
 // ###
 
-fn compile_filters(filters: &[FilterNode], values: &mut Vec<SqlValue>) -> RyxResult<String> {
+fn compile_filters(
+    filters: &[FilterNode],
+    values: &mut Vec<SqlValue>,
+    backend: Backend,
+) -> RyxResult<String> {
     let parts: Vec<String> = filters
         .iter()
-        .map(|f| compile_single_filter(&f.field, &f.lookup, &f.value, f.negated, values))
+        .map(|f| compile_single_filter(&f.field, &f.lookup, &f.value, f.negated, values, backend))
         .collect::<RyxResult<_>>()?;
     Ok(parts.join(" AND "))
 }
@@ -433,12 +448,55 @@ fn compile_single_filter(
     value: &SqlValue,
     negated: bool,
     values: &mut Vec<SqlValue>,
+    backend: Backend,
 ) -> RyxResult<String> {
     // Support "table.column" qualified references in filters
-    let col = qualified_col(field);
+    // Also handle field__transform patterns (e.g., "created_at__year")
+    let (base_column, applied_transforms) = if field.contains("__") {
+        let parts: Vec<&str> = field.split("__").collect();
+        let transforms: Vec<&str> = parts[1..].to_vec();
+
+        // Check if all suffix parts are transforms
+        let known_transforms = [
+            "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
+            "time", "iso_week", "iso_dow", "key", "key_text", "json",
+        ];
+
+        // Only treat as transforms if ALL parts after the first are known transforms
+        let all_transforms =
+            !transforms.is_empty() && transforms.iter().all(|t| known_transforms.contains(t));
+
+        if all_transforms {
+            (parts[0].to_string(), transforms)
+        } else {
+            (field.to_string(), vec![])
+        }
+    } else {
+        (field.to_string(), vec![])
+    };
+
+    // If the lookup contains "__" (is a chained lookup like "month__gte"),
+    // DON'T apply transforms here - let resolve() handle it completely
+    // This avoids double-transform issues where the compiler applies transform
+    // and then resolve() also tries to handle it
+    let final_column = if lookup.contains("__") {
+        // For chained lookups, use just the base column - resolve() will handle transforms
+        qualified_col(&base_column)
+    } else if !applied_transforms.is_empty() {
+        // For simple transform-only lookups (like "year"), apply transforms here
+        let mut result = qualified_col(&base_column);
+        for transform in &applied_transforms {
+            result = lookup::apply_transform(transform, &result, backend)?;
+        }
+        result
+    } else {
+        qualified_col(&base_column)
+    };
+
     let ctx = LookupContext {
-        column: col.clone(),
+        column: final_column.clone(),
         negated,
+        backend,
     };
 
     // # isnull (no bind param)
@@ -449,9 +507,9 @@ fn compile_single_filter(
             _ => true,
         };
         let fragment = if is_null {
-            format!("{col} IS NULL")
+            format!("{final_column} IS NULL")
         } else {
-            format!("{col} IS NOT NULL")
+            format!("{final_column} IS NOT NULL")
         };
         return Ok(if negated {
             format!("NOT ({fragment})")
@@ -473,7 +531,7 @@ fn compile_single_filter(
             .collect::<Vec<_>>()
             .join(", ");
         values.extend(items);
-        let fragment = format!("{col} IN ({ph})");
+        let fragment = format!("{final_column} IN ({ph})");
         return Ok(if negated {
             format!("NOT ({fragment})")
         } else {
@@ -489,7 +547,7 @@ fn compile_single_filter(
         };
         values.push(lo);
         values.push(hi);
-        let fragment = format!("{col} BETWEEN ? AND ?");
+        let fragment = format!("{final_column} BETWEEN ? AND ?");
         return Ok(if negated {
             format!("NOT ({fragment})")
         } else {
@@ -498,7 +556,55 @@ fn compile_single_filter(
     }
 
     // # general lookup
-    let fragment = lookup::resolve(field, lookup, &ctx)?;
+    // If lookup is a transform (like "year", "month"), use the transform function which includes = ?
+    // BUT if lookup contains "__" (like "date__gte"), we need to use resolve() to handle the chain
+    let known_transforms = [
+        "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
+        "time", "iso_week", "iso_dow", "key", "key_text", "json",
+    ];
+
+    // If lookup contains "__", it's a chained lookup (e.g., "date__gte") - use resolve()
+    if lookup.contains("__") {
+        let fragment = lookup::resolve(&base_column, lookup, &ctx)?;
+        values.push(value.clone());
+        return Ok(if negated {
+            format!("NOT ({fragment})")
+        } else {
+            fragment
+        });
+    }
+
+    if known_transforms.contains(&lookup) {
+        let transform_fn = match lookup {
+            "date" => lookup::date_transform,
+            "year" => lookup::year_transform,
+            "month" => lookup::month_transform,
+            "day" => lookup::day_transform,
+            "hour" => lookup::hour_transform,
+            "minute" => lookup::minute_transform,
+            "second" => lookup::second_transform,
+            "week" => lookup::week_transform,
+            "dow" => lookup::dow_transform,
+            "quarter" => lookup::quarter_transform,
+            "time" => lookup::time_transform,
+            "iso_week" => lookup::iso_week_transform,
+            "iso_dow" => lookup::iso_dow_transform,
+            "key" => lookup::json_key_transform,
+            "key_text" => lookup::json_key_text_transform,
+            "json" => lookup::json_cast_transform,
+            _ => {
+                return Err(RyxError::UnknownLookup {
+                    field: field.to_string(),
+                    lookup: lookup.to_string(),
+                })
+            }
+        };
+        // For transforms, we need to push the value to the values vector
+        values.push(value.clone());
+        return Ok(transform_fn(&ctx));
+    }
+
+    let fragment = lookup::resolve(&base_column, lookup, &ctx)?;
     let bound = apply_like_wrapping(lookup, value.clone());
     values.push(bound);
     Ok(if negated {
