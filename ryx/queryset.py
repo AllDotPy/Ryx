@@ -818,16 +818,53 @@ def _get_known_lookups() -> frozenset:
                 "isnull",
                 "in",
                 "range",
+                # Date/Time transforms (can be part of chains)
+                "date",
+                "year",
+                "month",
+                "day",
+                "hour",
+                "minute",
+                "second",
+                "week",
+                "dow",
+                # JSON transforms (can be part of chains)
+                "key",
+                "key_text",
+                "json",
+                # JSON lookups (final lookups)
+                "has_key",
+                "has_keys",
+                "contains",
+                "contained_by",
             }
         )
 
 
 def _parse_lookup_key(key: str):
-    """Split 'field__lookup' → ('field', 'lookup'), or ('field', 'exact')."""
+    """Split 'field__lookup' → ('field', 'lookup'), or handle chained lookups.
+
+    Examples:
+        'created_at__gte'     → ('created_at', 'gte')
+        'created_at__year__gte' → ('created_at', 'year__gte')
+        'my_json__key__icontains' → ('my_json', 'key__icontains')
+        'metadata__key__has_key' → ('metadata', 'key__has_key')
+        'title__unknown'      → ('title', 'exact')  # unknown lookup falls back to exact
+    """
     known = _get_known_lookups()
     parts = key.split("__")
-    if len(parts) >= 2 and parts[-1] in known:
-        return "__".join(parts[:-1]), parts[-1]
+
+    if len(parts) >= 2:
+        # Search from the end to find the last known lookup
+        for i in range(len(parts) - 1, 0, -1):
+            if parts[i] in known:
+                field = "__".join(parts[:i])
+                lookup = "__".join(parts[i:])
+                return field, lookup
+
+        # No known lookup found in chain
+        return parts[0], "exact"
+
     return key, "exact"
 
 
