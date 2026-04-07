@@ -452,28 +452,46 @@ fn compile_single_filter(
 ) -> RyxResult<String> {
     // Support "table.column" qualified references in filters
     // Also handle field__transform patterns (e.g., "created_at__year")
-    let (base_column, applied_transforms) = if field.contains("__") {
+    // For JSON key lookups like "bio__key__priority", we need to handle specially
+    let known_transforms = [
+        "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
+        "time", "iso_week", "iso_dow", "key", "key_text", "json",
+    ];
+
+    let (base_column, applied_transforms, json_key) = if field.contains("__") {
         let parts: Vec<&str> = field.split("__").collect();
-        let transforms: Vec<&str> = parts[1..].to_vec();
 
-        // Check if all suffix parts are transforms
-        let known_transforms = [
-            "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
-            "time", "iso_week", "iso_dow", "key", "key_text", "json",
-        ];
+        // Find the first part that's NOT a known transform - that's the JSON key
+        // For example: "bio__key__priority" -> transforms=["key"], key="priority", base="bio"
+        let mut transforms = Vec::new();
+        let mut key_part: Option<&str> = None;
 
-        // Only treat as transforms if ALL parts after the first are known transforms
-        let all_transforms =
-            !transforms.is_empty() && transforms.iter().all(|t| known_transforms.contains(t));
+        for part in parts[1..].iter() {
+            if known_transforms.contains(part) {
+                transforms.push(*part);
+            } else {
+                // First non-transform part is the JSON key
+                key_part = Some(*part);
+                break;
+            }
+        }
 
-        if all_transforms {
-            (parts[0].to_string(), transforms)
+        if let Some(key) = key_part {
+            // Base column is just the first part (the field name)
+            // Transforms is everything that came before the key
+            (parts[0].to_string(), transforms, Some(key.to_string()))
+        } else if !transforms.is_empty() {
+            // All parts are transforms
+            (parts[0].to_string(), transforms, None)
         } else {
-            (field.to_string(), vec![])
+            (field.to_string(), vec![], None)
         }
     } else {
-        (field.to_string(), vec![])
+        (field.to_string(), vec![], None)
     };
+
+    // For JSON key transforms, we need to pass the key to resolve()
+    // The key is embedded in the field name (bio__key__priority -> key=priority)
 
     // If the lookup contains "__" (is a chained lookup like "month__gte"),
     // DON'T apply transforms here - let resolve() handle it completely
@@ -486,17 +504,19 @@ fn compile_single_filter(
         // For simple transform-only lookups (like "year"), apply transforms here
         let mut result = qualified_col(&base_column);
         for transform in &applied_transforms {
-            result = lookup::apply_transform(transform, &result, backend)?;
+            result = lookup::apply_transform(transform, &result, backend, None)?;
         }
         result
     } else {
         qualified_col(&base_column)
     };
 
+    // For JSON key transforms, pass the key in the context
     let ctx = LookupContext {
         column: final_column.clone(),
         negated,
         backend,
+        json_key: json_key.clone(),
     };
 
     // # isnull (no bind param)
@@ -558,13 +578,15 @@ fn compile_single_filter(
     // # general lookup
     // If lookup is a transform (like "year", "month"), use the transform function which includes = ?
     // BUT if lookup contains "__" (like "date__gte"), we need to use resolve() to handle the chain
+    // ALSO use resolve() for JSON key transforms even if lookup is simple (like "exact")
     let known_transforms = [
         "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
         "time", "iso_week", "iso_dow", "key", "key_text", "json",
     ];
 
     // If lookup contains "__", it's a chained lookup (e.g., "date__gte") - use resolve()
-    if lookup.contains("__") {
+    // OR if we have a JSON key (json_key is Some), we need resolve() to apply it
+    if lookup.contains("__") || json_key.is_some() {
         let fragment = lookup::resolve(&base_column, lookup, &ctx)?;
         values.push(value.clone());
         return Ok(if negated {

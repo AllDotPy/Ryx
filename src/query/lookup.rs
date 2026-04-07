@@ -76,6 +76,10 @@ pub struct LookupContext {
     /// The database backend (PostgreSQL, MySQL, SQLite).
     /// Used for backend-specific SQL generation.
     pub backend: Backend,
+
+    /// For JSON key transforms (e.g., bio__key__priority), this holds the key name ("priority")
+    /// Used by apply_transform() to generate correct JSON path accessors.
+    pub json_key: Option<String>,
 }
 
 /// The function signature for a built-in lookup implementation.
@@ -222,9 +226,10 @@ pub fn register_custom(name: impl Into<String>, sql_template: impl Into<String>)
 
 /// Handle SQLite transform lookup when ctx.column already has transform applied
 /// This happens when compiler applied the transform but lookup is still simple (e.g., "gte")
+#[allow(dead_code)]
 fn handle_sqlite_transform_lookup(
     field: &str,
-    transform: &str,
+    _transform: &str,
     lookup_name: &str,
     ctx: &LookupContext,
 ) -> RyxResult<String> {
@@ -238,6 +243,7 @@ fn handle_sqlite_transform_lookup(
             column: transformed,
             negated: ctx.negated,
             backend: ctx.backend,
+            json_key: ctx.json_key.clone(),
         };
         return resolve_simple(field, lookup_name, &new_ctx);
     }
@@ -251,6 +257,23 @@ fn handle_sqlite_transform_lookup(
 pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult<String> {
     // If no "__", it's a simple lookup
     if !lookup_name.contains("__") {
+        // Check if we have a JSON key that needs to be applied
+        if ctx.json_key.is_some() {
+            // We have a JSON key transform to apply - ALWAYS start fresh from field
+            let mut column = format!("\"{}\"", field);
+            // Apply the key transform with the json_key
+            column = apply_transform("key", &column, ctx.backend, ctx.json_key.as_deref())?;
+
+            // Build new context with transformed column
+            let json_ctx = LookupContext {
+                column: column.clone(),
+                negated: ctx.negated,
+                backend: ctx.backend,
+                json_key: None,
+            };
+            return resolve_simple(field, lookup_name, &json_ctx);
+        }
+
         // Check if ctx.column already has a date/time transform applied (e.g., from compiler)
         // Handle the case where compiler applied transform but lookup is simple (e.g., "gte")
         if ctx.column.contains("strftime") || ctx.column.contains("DATE(") {
@@ -281,6 +304,7 @@ pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult
     let mut column = format!("\"{}\"", field);
 
     // Apply transforms in order until we hit a lookup
+    // For JSON transforms like "key", use ctx.json_key if available
     for transform in transform_parts.iter() {
         // Check if this is a known transform
         let is_transform = matches!(
@@ -304,7 +328,15 @@ pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult
         );
 
         if is_transform {
-            column = apply_transform(transform, &column, ctx.backend)?;
+            // For JSON transforms (key, key_text), use json_key from context if available
+            let key = if matches!(*transform, "key" | "key_text") {
+                ctx.json_key
+                    .as_deref()
+                    .or_else(|| field.rsplit("__").next())
+            } else {
+                None
+            };
+            column = apply_transform(transform, &column, ctx.backend, key)?;
         } else {
             // This part is a lookup, not a transform - stop here
             break;
@@ -316,6 +348,7 @@ pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult
         column: column.clone(),
         negated: ctx.negated,
         backend: ctx.backend,
+        json_key: ctx.json_key.clone(),
     };
 
     // For SQLite, handle type conversion for comparisons on transformed values
@@ -335,6 +368,7 @@ pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult
                     column: transformed,
                     negated: ctx.negated,
                     backend: ctx.backend,
+                    json_key: ctx.json_key.clone(),
                 };
                 return resolve_simple(field, final_lookup, &final_ctx_int);
             }
@@ -421,7 +455,13 @@ pub fn registered_lookups() -> RyxResult<Vec<String>> {
 
 /// Apply a field transformation (date, year, month, key, etc.)
 /// Returns SQL like "DATE(col)" or "EXTRACT(YEAR FROM col)"
-pub fn apply_transform(name: &str, column: &str, backend: Backend) -> RyxResult<String> {
+/// For JSON transforms (key, key_text), the key is extracted from the next part of the chain
+pub fn apply_transform(
+    name: &str,
+    column: &str,
+    backend: Backend,
+    key: Option<&str>,
+) -> RyxResult<String> {
     let sql = match (name, backend) {
         // Date/Time transforms
         ("date", _) => format!("DATE({})", column),
@@ -481,17 +521,35 @@ pub fn apply_transform(name: &str, column: &str, backend: Backend) -> RyxResult<
         ("iso_dow", Backend::MySQL) => format!("((DAYOFWEEK({}) + 5) % 7) + 1", column),
         ("iso_dow", Backend::SQLite) => format!("CAST(strftime('%w', {}) AS TEXT)", column),
 
-        // JSON transforms (key extraction)
-        ("key", Backend::PostgreSQL) => format!("({}->>'key')", column),
-        ("key", Backend::MySQL) => format!("JSON_UNQUOTE(JSON_EXTRACT({}, '$.key'))", column),
-        ("key", Backend::SQLite) => format!("json_extract({}, '$.key')", column),
+        // JSON transforms (key extraction) - key comes from the next part of the chain
+        ("key", Backend::PostgreSQL) => {
+            let k = key.unwrap_or("key");
+            format!("({}->>'{}')", column, k)
+        }
+        ("key", Backend::MySQL) => {
+            let k = key.unwrap_or("key");
+            format!("JSON_UNQUOTE(JSON_EXTRACT({}, '$.{}'))", column, k)
+        }
+        ("key", Backend::SQLite) => {
+            let k = key.unwrap_or("key");
+            format!("json_extract({}, '$.{}')", column, k)
+        }
 
-        ("key_text", Backend::PostgreSQL) => format!("({}->>'key')::text", column),
-        ("key_text", Backend::MySQL) => format!(
-            "CAST(JSON_UNQUOTE(JSON_EXTRACT({}, '$.key')) AS CHAR)",
-            column
-        ),
-        ("key_text", Backend::SQLite) => format!("CAST(json_extract({}, '$.key') AS TEXT)", column),
+        ("key_text", Backend::PostgreSQL) => {
+            let k = key.unwrap_or("key");
+            format!("({}->>'{}')::text", column, k)
+        }
+        ("key_text", Backend::MySQL) => {
+            let k = key.unwrap_or("key");
+            format!(
+                "CAST(JSON_UNQUOTE(JSON_EXTRACT({}, '.{}')) AS CHAR)",
+                column, k
+            )
+        }
+        ("key_text", Backend::SQLite) => {
+            let k = key.unwrap_or("key");
+            format!("CAST(json_extract({}, '.{}') AS TEXT)", column, k)
+        }
 
         ("json", Backend::PostgreSQL) => format!("({}::jsonb)", column),
         ("json", Backend::MySQL) => column.to_string(),

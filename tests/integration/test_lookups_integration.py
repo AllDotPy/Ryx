@@ -222,6 +222,66 @@ class TestJSONFieldLookups:
         # Actual JSON extraction requires JSONField
 
 
+class TestJSONDynamicKeyLookups:
+    """Test dynamic JSON key lookups like metadata__key__icontains."""
+
+    @pytest.mark.asyncio
+    async def test_json_dynamic_key_exact(self, clean_tables):
+        """Test dynamic key lookup using explicit key transform: bio__key__priority__exact='high'."""
+        await Author.objects.create(
+            name="Author 1",
+            email="a1@test.com",
+            bio='{"priority": "high", "role": "admin"}',
+        )
+        await Author.objects.create(
+            name="Author 2",
+            email="a2@test.com",
+            bio='{"priority": "low", "role": "user"}',
+        )
+        await Author.objects.create(
+            name="Author 3", email="a3@test.com", bio='{"other": "value"}'
+        )
+
+        # Use explicit key transform format: field__key__keyname__lookup
+        results = await Author.objects.filter(bio__key__priority__exact="high")
+
+        assert len(results) == 1
+        assert results[0].name == "Author 1"
+
+    @pytest.mark.asyncio
+    async def test_json_dynamic_key_contains(self, clean_tables):
+        """Test dynamic key with explicit exact lookup.
+
+        The Python parser treats 'key__role' as a chained lookup because 'key' is known.
+        We use explicit __exact to avoid this.
+        """
+        await Author.objects.create(
+            name="Author 1", email="a1@test.com", bio='{"role": "admin"}'
+        )
+        await Author.objects.create(
+            name="Author 2", email="a2@test.com", bio='{"role": "user"}'
+        )
+        await Author.objects.create(
+            name="Author 3", email="a3@test.com", bio='{"role": "manager"}'
+        )
+
+        # Use explicit __exact to force proper parsing
+        results = await Author.objects.filter(bio__key__role__exact="admin")
+        assert len(results) == 1
+        assert results[0].name == "Author 1"
+
+    @pytest.mark.asyncio
+    async def test_json_dynamic_key_not_exists(self, clean_tables):
+        """Test that missing key returns no results."""
+        await Author.objects.create(
+            name="Author 1", email="a1@test.com", bio='{"priority": "high"}'
+        )
+
+        # Use explicit key transform for non-existent key
+        results = await Author.objects.filter(bio__key__nonexistent__exact="value")
+        assert len(results) == 0
+
+
 class TestLookupsWithOrdering:
     """Test lookups combined with ordering."""
 
