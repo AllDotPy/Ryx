@@ -12,6 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::pool::Backend;
+
 // ###
 // SqlValue — a Python-safe, DB-bindable value
 // ###
@@ -251,6 +253,7 @@ pub enum QueryOperation {
 #[derive(Debug, Clone)]
 pub struct QueryNode {
     pub table: String,
+    pub backend: Backend, // Database backend for SQL generation
     pub operation: QueryOperation,
 
     // # WHERE
@@ -283,6 +286,7 @@ impl QueryNode {
     pub fn select(table: impl Into<String>) -> Self {
         Self {
             table: table.into(),
+            backend: Backend::PostgreSQL, // default, will be overridden at runtime
             operation: QueryOperation::Select { columns: None },
             filters: Vec::new(),
             q_filter: None,
@@ -365,6 +369,12 @@ impl QueryNode {
     #[must_use]
     pub fn with_offset(mut self, n: u64) -> Self {
         self.offset = Some(n);
+        self
+    }
+
+    #[must_use]
+    pub fn with_backend(mut self, backend: Backend) -> Self {
+        self.backend = backend;
         self
     }
 }

@@ -121,10 +121,13 @@ pub struct PyQueryBuilder {
 #[pymethods]
 impl PyQueryBuilder {
     #[new]
-    fn new(table: String) -> Self {
-        Self {
-            node: QueryNode::select(table),
-        }
+    fn new(table: String) -> PyResult<Self> {
+        // Get the backend from the pool at QueryBuilder creation time
+        let backend = pool::get_backend().unwrap_or(crate::pool::Backend::PostgreSQL);
+        
+        Ok(Self {
+            node: QueryNode::select(table).with_backend(backend),
+        })
     }
 
     fn add_filter(

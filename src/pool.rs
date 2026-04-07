@@ -26,6 +26,7 @@
 
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
 use sqlx::{
     AnyPool,
     any::{AnyPoolOptions, install_default_drivers},
@@ -33,6 +34,32 @@ use sqlx::{
 use tracing::{debug, info};
 
 use crate::errors::{RyxError, RyxResult};
+
+// ###
+// Backend enum
+// ###
+/// Database backend type.
+/// Used for backend-specific SQL generation (e.g., DATE() vs strftime()).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum Backend {
+    PostgreSQL,
+    MySQL,
+    SQLite,
+}
+
+/// Detect the backend from a database URL.
+pub fn detect_backend(url: &str) -> Backend {
+    let url_lower = url.to_lowercase();
+    if url_lower.contains("postgres") {
+        Backend::PostgreSQL
+    } else if url_lower.contains("mysql") {
+        Backend::MySQL
+    } else if url_lower.contains("sqlite") {
+        Backend::SQLite
+    } else {
+        Backend::PostgreSQL // default
+    }
+}
 
 // ###
 // Global singleton
@@ -47,6 +74,10 @@ use crate::errors::{RyxError, RyxResult};
 /// Initialized exactly once by `initialize()`. All ORM operations retrieve
 /// the pool via `get()`.
 static POOL: OnceLock<AnyPool> = OnceLock::new();
+
+/// The backend type for the initialized pool.
+/// Set at initialization time based on the database URL.
+static BACKEND: OnceLock<Backend> = OnceLock::new();
 
 // ###
 // Pool configuration options
@@ -141,6 +172,10 @@ pub async fn initialize(database_url: &str, config: PoolConfig) -> RyxResult<()>
     POOL.set(pool)
         .map_err(|_| RyxError::PoolAlreadyInitialized)?;
 
+    // Set the backend type based on the URL
+    let backend = detect_backend(database_url);
+    BACKEND.set(backend).ok();
+
     info!("Ryx connection pool initialized successfully");
     Ok(())
 }
@@ -159,6 +194,14 @@ pub fn get() -> RyxResult<&'static AnyPool> {
 /// Useful for diagnostic / health-check endpoints.
 pub fn is_initialized() -> bool {
     POOL.get().is_some()
+}
+
+/// Retrieve the current backend type.
+///
+/// # Errors
+/// Returns [`RyxError::PoolNotInitialized`] if `initialize()` has not been called.
+pub fn get_backend() -> RyxResult<Backend> {
+    BACKEND.get().copied().ok_or(RyxError::PoolNotInitialized)
 }
 
 /// Return pool statistics as a simple struct.
