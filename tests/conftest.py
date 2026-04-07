@@ -406,28 +406,48 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
+def pytest_collection_modifyitems(config, items):
+    """Add setup_database fixture to all integration test items."""
+    for item in items:
+        if "integration" in str(item.fspath):
+            # Ensure the fixture is added to the test
+            if "setup_database" not in item.fixturenames:
+                item.fixturenames.insert(0, "setup_database")
+
+
+@pytest.fixture(scope="session")
 def setup_database():
-    """Set up the test database once per test session."""
+    """Set up the test database once per test session. Only used by integration tests."""
     if not RUST_AVAILABLE:
         pytest.skip("Rust extension not available. Run 'maturin develop' first.")
 
-    # Use an on-disk SQLite file for tests to allow migrations and transactions.
-    # Starting with a clean database file avoids schema drift across reruns.
-    db_path = "test_db.sqlite3"
+    # Use absolute path for the database to avoid working directory issues
+    import tempfile
+
+    db_dir = tempfile.gettempdir()
+    db_path = os.path.join(db_dir, "test_db_ryx.sqlite3")
     if os.path.exists(db_path):
         os.remove(db_path)
 
     # Create the DB file for SQLite mode=rwc so it can open it.
     Path(db_path).touch()
 
-    db_url = f"sqlite://{db_path}?mode=rwc"
+    db_url = f"sqlite:///{db_path}?mode=rwc"
     os.environ["RYX_DATABASE_URL"] = db_url
     asyncio.run(ryx.setup(db_url))
 
     # Run migrations against test models so tables exist for integration tests
     runner = MigrationRunner([Author, Post, Tag, PostTag])
     asyncio.run(runner.migrate())
+
+    yield
+
+    # Cleanup
+    try:
+        if os.path.exists(db_path):
+            os.remove(db_path)
+    except Exception:
+        pass
 
 
 # Test Models
@@ -462,7 +482,7 @@ class Post(Model):
     active = BooleanField(default=True)
     score = FloatField(default=0.0)
     author = ForeignKey(Author, null=True, on_delete="SET_NULL")
-    created_at = DateTimeField(auto_now_add=True, null=True)
+    created_at = DateTimeField(null=True)
     updated_at = DateTimeField(auto_now=True, null=True)
 
     async def clean(self):

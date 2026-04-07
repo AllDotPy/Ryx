@@ -3,9 +3,9 @@ Integration tests for CRUD operations.
 """
 
 import pytest
-from conftest import Author, Post, Tag
+from conftest import Author, Post, Tag, PostTag, clean_tables
 
-from ryx.exceptions import ValidationError, MultipleObjectsReturned 
+from ryx.exceptions import ValidationError, MultipleObjectsReturned
 
 
 class TestCreate:
@@ -14,10 +14,7 @@ class TestCreate:
     @pytest.mark.asyncio
     async def test_create_simple(self, clean_tables):
         """Test basic object creation."""
-        author = await Author.objects.create(
-            name="John Doe",
-            email="john@example.com"
-        )
+        author = await Author.objects.create(name="John Doe", email="john@example.com")
 
         assert author.pk is not None
         assert author.name == "John Doe"
@@ -27,10 +24,7 @@ class TestCreate:
     @pytest.mark.asyncio
     async def test_create_with_defaults(self, clean_tables):
         """Test creation with default values."""
-        post = await Post.objects.create(
-            title="Test Post",
-            slug="test-post"
-        )
+        post = await Post.objects.create(title="Test Post", slug="test-post")
 
         assert post.pk is not None
         assert post.title == "Test Post"
@@ -52,8 +46,7 @@ class TestCreate:
     async def test_get_or_create_create(self, clean_tables):
         """Test get_or_create when object doesn't exist."""
         author, created = await Author.objects.get_or_create(
-            email="new@example.com",
-            defaults={"name": "New Author"}
+            email="new@example.com", defaults={"name": "New Author"}
         )
 
         assert created is True
@@ -64,13 +57,11 @@ class TestCreate:
     async def test_get_or_create_get(self, clean_tables):
         """Test get_or_create when object exists."""
         existing = await Author.objects.create(
-            name="Existing Author",
-            email="existing@example.com"
+            name="Existing Author", email="existing@example.com"
         )
 
         author, created = await Author.objects.get_or_create(
-            email="existing@example.com",
-            defaults={"name": "Should not be used"}
+            email="existing@example.com", defaults={"name": "Should not be used"}
         )
 
         assert created is False
@@ -81,8 +72,7 @@ class TestCreate:
     async def test_update_or_create_create(self, clean_tables):
         """Test update_or_create when object doesn't exist."""
         post, created = await Post.objects.update_or_create(
-            slug="new-post",
-            defaults={"title": "New Post", "views": 10}
+            slug="new-post", defaults={"title": "New Post", "views": 10}
         )
 
         assert created is True
@@ -94,14 +84,11 @@ class TestCreate:
     async def test_update_or_create_update(self, clean_tables):
         """Test update_or_create when object exists."""
         existing = await Post.objects.create(
-            title="Original Title",
-            slug="test-post",
-            views=5
+            title="Original Title", slug="test-post", views=5
         )
 
         post, created = await Post.objects.update_or_create(
-            slug="test-post",
-            defaults={"title": "Updated Title", "views": 20}
+            slug="test-post", defaults={"title": "Updated Title", "views": 20}
         )
 
         assert created is False
