@@ -45,6 +45,7 @@ use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
 use crate::errors::{RyxError, RyxResult};
+use crate::pool::Backend;
 
 // ###
 // Core types
@@ -71,6 +72,10 @@ pub struct LookupContext {
     /// Whether the lookup is negated (i.e., inside an `exclude()` call).
     /// Most lookups ignore this — negation is applied by the compiler.
     pub negated: bool,
+
+    /// The database backend (PostgreSQL, MySQL, SQLite).
+    /// Used for backend-specific SQL generation.
+    pub backend: Backend,
 }
 
 /// The function signature for a built-in lookup implementation.
@@ -144,6 +149,34 @@ pub fn init_registry() {
         // Range lookup
         builtin.insert("range", range as LookupFn);
 
+        // Date/Time transforms (for chaining like created_at__date__gte)
+        // These are registered as lookups that return SQL fragments
+        builtin.insert("date", date_transform as LookupFn);
+        builtin.insert("year", year_transform as LookupFn);
+        builtin.insert("month", month_transform as LookupFn);
+        builtin.insert("day", day_transform as LookupFn);
+        builtin.insert("hour", hour_transform as LookupFn);
+        builtin.insert("minute", minute_transform as LookupFn);
+        builtin.insert("second", second_transform as LookupFn);
+        builtin.insert("week", week_transform as LookupFn);
+        builtin.insert("dow", dow_transform as LookupFn);
+        // New transforms
+        builtin.insert("quarter", quarter_transform as LookupFn);
+        builtin.insert("time", time_transform as LookupFn);
+        builtin.insert("iso_week", iso_week_transform as LookupFn);
+        builtin.insert("iso_dow", iso_dow_transform as LookupFn);
+
+        // JSON transforms (for chaining like metadata__key__icontains)
+        builtin.insert("key", json_key_transform as LookupFn);
+        builtin.insert("key_text", json_key_text_transform as LookupFn);
+        builtin.insert("json", json_cast_transform as LookupFn);
+
+        // JSON lookups (comparison operators)
+        builtin.insert("has_key", json_has_key as LookupFn);
+        builtin.insert("has_keys", json_has_keys as LookupFn);
+        builtin.insert("contains", json_contains as LookupFn);
+        builtin.insert("contained_by", json_contained_by as LookupFn);
+
         RwLock::new(LookupRegistry {
             builtin,
             custom: HashMap::new(),
@@ -183,17 +216,163 @@ pub fn register_custom(name: impl Into<String>, sql_template: impl Into<String>)
     Ok(())
 }
 
-/// Resolve a lookup name + column into a SQL fragment.
-///
-/// Resolution order: custom registry → built-in registry → error.
-/// This lets users override built-ins selectively.
-///
-/// # Returns
-/// A SQL fragment string with `?` as the value placeholder.
-///
-/// # Errors
-/// [`RyxError::UnknownLookup`] if the name is not found in either registry.
+// ###
+// Chained lookups support (e.g., "date__gte", "year__month")
+// ###
+
+/// Handle SQLite transform lookup when ctx.column already has transform applied
+/// This happens when compiler applied the transform but lookup is still simple (e.g., "gte")
+fn handle_sqlite_transform_lookup(
+    field: &str,
+    transform: &str,
+    lookup_name: &str,
+    ctx: &LookupContext,
+) -> RyxResult<String> {
+    // Check if we need to convert TEXT to INTEGER for numeric comparisons
+    let is_numeric_comparison = matches!(lookup_name, "gt" | "gte" | "lt" | "lte" | "exact");
+
+    if is_numeric_comparison && ctx.column.contains("AS TEXT)") {
+        // Convert TEXT to INTEGER
+        let transformed = ctx.column.replace("AS TEXT)", "AS INTEGER)");
+        let new_ctx = LookupContext {
+            column: transformed,
+            negated: ctx.negated,
+            backend: ctx.backend,
+        };
+        return resolve_simple(field, lookup_name, &new_ctx);
+    }
+
+    // Otherwise, use as-is
+    resolve_simple(field, lookup_name, ctx)
+}
+
+/// Resolve a chained lookup like "date__gte" or "year__exact".
+/// This applies transforms first (date, year, month, etc.) then the final lookup.
 pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult<String> {
+    // If no "__", it's a simple lookup
+    if !lookup_name.contains("__") {
+        // Check if ctx.column already has a date/time transform applied (e.g., from compiler)
+        // Handle the case where compiler applied transform but lookup is simple (e.g., "gte")
+        if ctx.column.contains("strftime") || ctx.column.contains("DATE(") {
+            // Detect transform type from SQL
+            if ctx.column.contains("strftime('%Y'") {
+                return handle_sqlite_transform_lookup(field, "year", lookup_name, ctx);
+            } else if ctx.column.contains("strftime('%m'") {
+                return handle_sqlite_transform_lookup(field, "month", lookup_name, ctx);
+            } else if ctx.column.contains("strftime('%d'") {
+                return handle_sqlite_transform_lookup(field, "day", lookup_name, ctx);
+            } else if ctx.column.contains("strftime('%H'") {
+                return handle_sqlite_transform_lookup(field, "hour", lookup_name, ctx);
+            }
+            // For DATE() transform, we need different handling for comparisons
+            if ctx.column.starts_with("DATE(") {
+                return resolve_simple(field, lookup_name, ctx);
+            }
+        }
+        return resolve_simple(field, lookup_name, ctx);
+    }
+
+    // Chained: split into transforms + final lookup
+    let parts: Vec<&str> = lookup_name.split("__").collect();
+    let final_lookup = *parts.last().unwrap();
+    let transform_parts: Vec<&str> = parts[..parts.len() - 1].to_vec();
+
+    // Start fresh from the base column - don't use ctx.column which may already have transforms
+    let mut column = format!("\"{}\"", field);
+
+    // Apply transforms in order until we hit a lookup
+    for transform in transform_parts.iter() {
+        // Check if this is a known transform
+        let is_transform = matches!(
+            *transform,
+            "date"
+                | "year"
+                | "month"
+                | "day"
+                | "hour"
+                | "minute"
+                | "second"
+                | "week"
+                | "dow"
+                | "quarter"
+                | "time"
+                | "iso_week"
+                | "iso_dow"
+                | "key"
+                | "key_text"
+                | "json"
+        );
+
+        if is_transform {
+            column = apply_transform(transform, &column, ctx.backend)?;
+        } else {
+            // This part is a lookup, not a transform - stop here
+            break;
+        }
+    }
+
+    // Build a new context with the transformed column
+    let final_ctx = LookupContext {
+        column: column.clone(),
+        negated: ctx.negated,
+        backend: ctx.backend,
+    };
+
+    // For SQLite, handle type conversion for comparisons on transformed values
+    if ctx.backend == Backend::SQLite {
+        // Check if the column contains a date/time transform
+        let col_has_transform = column.contains("strftime");
+
+        if col_has_transform && !column.contains("AS INTEGER") {
+            // Column is TEXT from a transform, need to convert for numeric comparisons
+            let is_numeric_comparison =
+                matches!(final_lookup, "gt" | "gte" | "lt" | "lte" | "exact");
+
+            if is_numeric_comparison {
+                // Convert TEXT to INTEGER by replacing AS TEXT with AS INTEGER
+                let transformed = column.replace("AS TEXT)", "AS INTEGER)");
+                let final_ctx_int = LookupContext {
+                    column: transformed,
+                    negated: ctx.negated,
+                    backend: ctx.backend,
+                };
+                return resolve_simple(field, final_lookup, &final_ctx_int);
+            }
+
+            // For non-numeric comparisons, cast the bind value
+            let fragment = resolve_simple(field, final_lookup, &final_ctx)?;
+            return Ok(add_sqlite_cast_for_transform(&fragment, final_lookup));
+        }
+    }
+
+    // Default: resolve normally
+    resolve_simple(field, final_lookup, &final_ctx)
+}
+
+#[allow(dead_code)]
+/// Convert a SQLite transform expression from TEXT to INTEGER for numeric comparisons
+fn convert_transform_to_integer(column: &str) -> String {
+    // Replace CAST(...AS TEXT) with CAST(...AS INTEGER)
+    column.replace("AS TEXT)", "AS INTEGER)")
+}
+
+/// Add CAST(? AS TEXT) for SQLite date/time transform comparisons
+fn add_sqlite_cast_for_transform(fragment: &str, lookup: &str) -> String {
+    // For lookups that use = ?, replace = ? with = CAST(? AS TEXT)
+    // For lookups that use > ?, etc., replace with > CAST(? AS TEXT)
+
+    match lookup {
+        "exact" => fragment.replace("= ?", "= CAST(? AS TEXT)"),
+        "gt" => fragment.replace("> ?", "> CAST(? AS TEXT)"),
+        "gte" => fragment.replace(">= ?", ">= CAST(? AS TEXT)"),
+        "lt" => fragment.replace("< ?", "< CAST(? AS TEXT)"),
+        "lte" => fragment.replace("<= ?", "<= CAST(? AS TEXT)"),
+        _ => fragment.to_string(),
+    }
+}
+
+/// Resolve a simple (non-chained) lookup.
+fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult<String> {
     let registry = REGISTRY
         .get()
         .ok_or_else(|| RyxError::Internal("Lookup registry not initialized".into()))?;
@@ -238,6 +417,95 @@ pub fn registered_lookups() -> RyxResult<Vec<String>> {
         .collect();
     names.sort();
     Ok(names)
+}
+
+/// Apply a field transformation (date, year, month, key, etc.)
+/// Returns SQL like "DATE(col)" or "EXTRACT(YEAR FROM col)"
+pub fn apply_transform(name: &str, column: &str, backend: Backend) -> RyxResult<String> {
+    let sql = match (name, backend) {
+        // Date/Time transforms
+        ("date", _) => format!("DATE({})", column),
+
+        ("year", Backend::PostgreSQL) => format!("EXTRACT(YEAR FROM {})", column),
+        ("year", Backend::MySQL) => format!("YEAR({})", column),
+        ("year", Backend::SQLite) => format!("CAST(strftime('%Y', {}) AS TEXT)", column),
+
+        ("month", Backend::PostgreSQL) => format!("EXTRACT(MONTH FROM {})", column),
+        ("month", Backend::MySQL) => format!("MONTH({})", column),
+        ("month", Backend::SQLite) => format!("CAST(strftime('%m', {}) AS TEXT)", column),
+
+        ("day", Backend::PostgreSQL) => format!("EXTRACT(DAY FROM {})", column),
+        ("day", Backend::MySQL) => format!("DAYOFMONTH({})", column),
+        ("day", Backend::SQLite) => format!("CAST(strftime('%d', {}) AS TEXT)", column),
+
+        ("hour", Backend::PostgreSQL) => format!("EXTRACT(HOUR FROM {})", column),
+        ("hour", Backend::MySQL) => format!("HOUR({})", column),
+        ("hour", Backend::SQLite) => format!("CAST(strftime('%H', {}) AS TEXT)", column),
+
+        ("minute", Backend::PostgreSQL) => format!("EXTRACT(MINUTE FROM {})", column),
+        ("minute", Backend::MySQL) => format!("MINUTE({})", column),
+        ("minute", Backend::SQLite) => format!("CAST(strftime('%M', {}) AS TEXT)", column),
+
+        ("second", Backend::PostgreSQL) => format!("EXTRACT(SECOND FROM {})", column),
+        ("second", Backend::MySQL) => format!("SECOND({})", column),
+        ("second", Backend::SQLite) => format!("CAST(strftime('%S', {}) AS TEXT)", column),
+
+        ("week", Backend::PostgreSQL) => format!("EXTRACT(WEEK FROM {})", column),
+        ("week", Backend::MySQL) => format!("WEEK({})", column),
+        ("week", Backend::SQLite) => format!("CAST(strftime('%W', {}) AS TEXT)", column),
+
+        ("dow", Backend::PostgreSQL) => format!("EXTRACT(DOW FROM {})", column),
+        ("dow", Backend::MySQL) => format!("DAYOFWEEK({})", column),
+        ("dow", Backend::SQLite) => format!("CAST(strftime('%w', {}) AS TEXT)", column),
+
+        // New Date/Time transforms
+        ("quarter", Backend::PostgreSQL) => format!("EXTRACT(QUARTER FROM {})", column),
+        ("quarter", Backend::MySQL) => format!("QUARTER({})", column),
+        ("quarter", Backend::SQLite) => format!(
+            "CAST((CAST(strftime('%m', {}) AS INTEGER) + 2) / 3 AS TEXT)",
+            column
+        ),
+
+        ("time", Backend::PostgreSQL) => format!("TIME({})", column),
+        ("time", Backend::MySQL) => format!("TIME({})", column),
+        ("time", Backend::SQLite) => format!("time({})", column),
+
+        ("iso_week", Backend::PostgreSQL) => format!("EXTRACT(ISOWEEK FROM {})", column),
+        ("iso_week", Backend::MySQL) => format!(
+            "WEEK({}, 1) - WEEK(DATE_SUB({}, INTERVAL (DAYOFWEEK({}) - 1) DAY), 0) + 1",
+            column, column, column
+        ),
+        ("iso_week", Backend::SQLite) => format!("CAST(strftime('%W', {}) AS TEXT)", column),
+
+        ("iso_dow", Backend::PostgreSQL) => format!("EXTRACT(ISODOW FROM {})", column),
+        ("iso_dow", Backend::MySQL) => format!("((DAYOFWEEK({}) + 5) % 7) + 1", column),
+        ("iso_dow", Backend::SQLite) => format!("CAST(strftime('%w', {}) AS TEXT)", column),
+
+        // JSON transforms (key extraction)
+        ("key", Backend::PostgreSQL) => format!("({}->>'key')", column),
+        ("key", Backend::MySQL) => format!("JSON_UNQUOTE(JSON_EXTRACT({}, '$.key'))", column),
+        ("key", Backend::SQLite) => format!("json_extract({}, '$.key')", column),
+
+        ("key_text", Backend::PostgreSQL) => format!("({}->>'key')::text", column),
+        ("key_text", Backend::MySQL) => format!(
+            "CAST(JSON_UNQUOTE(JSON_EXTRACT({}, '$.key')) AS CHAR)",
+            column
+        ),
+        ("key_text", Backend::SQLite) => format!("CAST(json_extract({}, '$.key') AS TEXT)", column),
+
+        ("json", Backend::PostgreSQL) => format!("({}::jsonb)", column),
+        ("json", Backend::MySQL) => column.to_string(),
+        ("json", Backend::SQLite) => column.to_string(),
+
+        _ => {
+            return Err(RyxError::UnknownLookup {
+                field: column.to_string(),
+                lookup: name.to_string(),
+            })
+        }
+    };
+
+    Ok(sql)
 }
 
 // ###
@@ -340,4 +608,208 @@ fn in_lookup(ctx: &LookupContext) -> String {
 /// Uses two bind parameters. The compiler handles this specially.
 fn range(ctx: &LookupContext) -> String {
     format!("{} BETWEEN ? AND ?", ctx.column)
+}
+
+// ###
+// Date/Time Transform Functions (for chained lookups)
+// ###
+
+/// `field__date` → `DATE(field)` (backend-aware) - implicit equality
+pub fn date_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("DATE({}) = ?", ctx.column),
+        Backend::MySQL => format!("DATE({}) = ?", ctx.column),
+        Backend::SQLite => format!("date({}) = CAST(? AS TEXT)", ctx.column),
+    }
+}
+
+/// `field__year` → `EXTRACT(YEAR FROM field)` or `YEAR(field)` (backend-aware) - implicit equality
+pub fn year_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(YEAR FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("YEAR({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%Y', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__month` → `EXTRACT(MONTH FROM field)` or `MONTH(field)` (backend-aware) - implicit equality
+pub fn month_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(MONTH FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("MONTH({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%m', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__day` → `EXTRACT(DAY FROM field)` or `DAY(field)` (backend-aware) - implicit equality
+pub fn day_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(DAY FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("DAYOFMONTH({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%d', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__hour` → `EXTRACT(HOUR FROM field)` or `HOUR(field)` (backend-aware) - implicit equality
+pub fn hour_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(HOUR FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("HOUR({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%H', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__minute` → `EXTRACT(MINUTE FROM field)` or `MINUTE(field)` (backend-aware) - implicit equality
+pub fn minute_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(MINUTE FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("MINUTE({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%M', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__second` → `EXTRACT(SECOND FROM field)` or `SECOND(field)` (backend-aware) - implicit equality
+pub fn second_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(SECOND FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("SECOND({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%S', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__week` → `EXTRACT(WEEK FROM field)` or `WEEK(field)` (backend-aware) - implicit equality
+pub fn week_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(WEEK FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("WEEK({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%W', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__dow` → `EXTRACT(DOW FROM field)` or `DAYOFWEEK(field)` (backend-aware) - implicit equality
+pub fn dow_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(DOW FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("DAYOFWEEK({}) = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%w', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__quarter` → `EXTRACT(QUARTER FROM field)` or `QUARTER(field)` (backend-aware) - implicit equality
+pub fn quarter_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(QUARTER FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("QUARTER({}) = ?", ctx.column),
+        Backend::SQLite => format!(
+            "((CAST(strftime('%m', {}) AS INTEGER) + 2) / 3) = ?",
+            ctx.column
+        ),
+    }
+}
+
+/// `field__time` → `TIME(field)` or equivalent (backend-aware) - implicit equality
+pub fn time_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("TIME({}) = ?", ctx.column),
+        Backend::MySQL => format!("TIME({}) = ?", ctx.column),
+        Backend::SQLite => format!("time({}) = ?", ctx.column),
+    }
+}
+
+/// `field__iso_week` → `EXTRACT(ISOWEEK FROM field)` or equivalent (backend-aware) - implicit equality
+pub fn iso_week_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(ISOWEEK FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!(
+            "WEEK({}, 1) - WEEK(DATE_SUB({}, INTERVAL (DAYOFWEEK({}) - 1) DAY), 0) + 1 = ?",
+            ctx.column, ctx.column, ctx.column
+        ),
+        Backend::SQLite => format!("CAST(strftime('%W', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+/// `field__iso_dow` → `EXTRACT(ISODOW FROM field)` or equivalent (backend-aware) - implicit equality
+pub fn iso_dow_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("EXTRACT(ISODOW FROM {}) = ?", ctx.column),
+        Backend::MySQL => format!("((DAYOFWEEK({}) + 5) % 7) + 1 = ?", ctx.column),
+        Backend::SQLite => format!("CAST(strftime('%w', {}) AS INTEGER) = ?", ctx.column),
+    }
+}
+
+// ###
+// JSON Transform Functions (for chained lookups)
+// ###
+
+/// `field__key` → `(field->>'key')` or `JSON_UNQUOTE(JSON_EXTRACT(field, '$.key'))`
+pub fn json_key_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({}->>'key')", ctx.column),
+        Backend::MySQL => format!("JSON_UNQUOTE(JSON_EXTRACT({}, '$.key'))", ctx.column),
+        Backend::SQLite => format!("json_extract({}, '$.key')", ctx.column),
+    }
+}
+
+/// `field__key_text` → `(field->>'key')::text` (for text comparisons like icontains)
+pub fn json_key_text_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({}->>'key')::text", ctx.column),
+        Backend::MySQL => format!(
+            "CAST(JSON_UNQUOTE(JSON_EXTRACT({}, '$.key')) AS CHAR)",
+            ctx.column
+        ),
+        Backend::SQLite => format!("CAST(json_extract({}, '$.key') AS TEXT)", ctx.column),
+    }
+}
+
+/// `field__json` → `field::jsonb` (PostgreSQL) or just field (MySQL/SQLite)
+pub fn json_cast_transform(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({}::jsonb)", ctx.column),
+        Backend::MySQL => ctx.column.clone(),
+        Backend::SQLite => ctx.column.clone(),
+    }
+}
+
+// ###
+// JSON Lookup Functions (comparison operators)
+// ###
+
+/// `field__has_key="key"` → `field ? 'key'` (PostgreSQL) or `JSON_CONTAINS(field, '"key"')` (MySQL)
+fn json_has_key(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({} ? 'key')", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS({}, '\"key\"')", ctx.column),
+        Backend::SQLite => format!("json_extract({}, '$.key') IS NOT NULL", ctx.column),
+    }
+}
+
+/// `field__has_keys=['key1', 'key2']` → `field ?& array['key1', 'key2']`
+fn json_has_keys(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({} ?& array['key1', 'key2'])", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS({}, '[\"key1\", \"key2\"]')", ctx.column),
+        Backend::SQLite => format!(
+            "json_extract({}, '$.key1') IS NOT NULL AND json_extract({}, '$.key2') IS NOT NULL",
+            ctx.column, ctx.column
+        ),
+    }
+}
+
+/// `field__contains={"key": "value"}` → `field @> ?` (PostgreSQL)
+fn json_contains(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({} @> ?)", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS({}, ?)", ctx.column),
+        Backend::SQLite => ctx.column.clone(), // Limited support in SQLite
+    }
+}
+
+/// `field__contained_by={"key": "value"}` → `field <@ ?` (PostgreSQL)
+fn json_contained_by(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({} <@ ?)", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS(?, {})", ctx.column),
+        Backend::SQLite => ctx.column.clone(), // Limited support in SQLite
+    }
 }
