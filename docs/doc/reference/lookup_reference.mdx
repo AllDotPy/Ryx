@@ -1,110 +1,56 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
-# Filtering
+# Lookup Reference
 
-The `.filter()` method is your primary tool for querying. It translates Python arguments into SQL `WHERE` clauses.
-
-## Basic Syntax
-
-```python
-# Exact match (lookup name is implicit)
-await Post.objects.filter(active=True)
-await Post.objects.filter(author_id=5)
-
-# With a lookup
-await Post.objects.filter(views__gt=100)
-```
-
-The pattern is `field_name__lookup=value`. When no lookup is specified, `exact` is used.
+This document lists all built-in lookups and transforms available in Ryx.
 
 ## Comparison Lookups
 
-```python
-Post.objects.filter(views__gt=100)    # views > 100
-Post.objects.filter(views__gte=100)   # views >= 100
-Post.objects.filter(views__lt=50)     # views < 50
-Post.objects.filter(views__lte=50)    # views <= 50
-```
-
-## String Lookups
-
-```python
-Post.objects.filter(title__contains="Python")        # LIKE '%Python%'
-Post.objects.filter(title__icontains="python")       # LIKE '%python%' (case-insensitive)
-Post.objects.filter(title__startswith="How")          # LIKE 'How%'
-Post.objects.filter(title__istartswith="how")         # LIKE 'how%' (case-insensitive)
-Post.objects.filter(title__endswith="guide")          # LIKE '%guide'
-Post.objects.filter(title__iendswith="Guide")         # LIKE '%guide' (case-insensitive)
-```
-
-## Null Checks
-
-```python
-Post.objects.filter(body__isnull=True)    # body IS NULL
-Post.objects.filter(body__isnull=False)   # body IS NOT NULL
-```
-
-## Membership
-
-```python
-# IN clause
-Post.objects.filter(status__in=["draft", "published"])
-Post.objects.filter(id__in=[1, 2, 3, 4, 5])
-```
-
-## Range
-
-```python
-# BETWEEN clause
-Post.objects.filter(views__range=(100, 1000))
-Post.objects.filter(created_at__range=(start_date, end_date))
-```
-
-## Multiple Filters
-
-Multiple filters are `AND`-ed together:
-
-```python
-# WHERE active = true AND views > 100
-Post.objects.filter(active=True, views__gt=100)
-```
-
-## Excluding
-
-```python
-# WHERE NOT (status = 'draft')
-Post.objects.exclude(status="draft")
-
-# Chain filter + exclude
-Post.objects.filter(active=True).exclude(title__startswith="Draft")
-```
-
-## Built-in Lookups Reference
-
 | Lookup | SQL | Example |
-|---|---|---|
+|--------|-----|---------|
 | `exact` | `col = ?` | `filter(title="Hello")` |
 | `gt` | `col > ?` | `filter(views__gt=100)` |
 | `gte` | `col >= ?` | `filter(views__gte=100)` |
 | `lt` | `col < ?` | `filter(views__lt=50)` |
 | `lte` | `col <= ?` | `filter(views__lte=1000)` |
+
+## String Lookups
+
+| Lookup | SQL | Example |
+|--------|-----|---------|
 | `contains` | `col LIKE ?` | `filter(title__contains="Py")` |
 | `icontains` | `LOWER(col) LIKE LOWER(?)` | `filter(title__icontains="py")` |
 | `startswith` | `col LIKE ?` | `filter(title__startswith="How")` |
 | `istartswith` | `LOWER(col) LIKE LOWER(?)` | `filter(title__istartswith="how")` |
 | `endswith` | `col LIKE ?` | `filter(title__endswith="guide")` |
 | `iendswith` | `LOWER(col) LIKE LOWER(?)` | `filter(title__iendswith="Guide")` |
+
+## Null Checks
+
+| Lookup | SQL | Example |
+|--------|-----|---------|
 | `isnull` | `col IS NULL / IS NOT NULL` | `filter(body__isnull=True)` |
+
+## Membership
+
+| Lookup | SQL | Example |
+|--------|-----|---------|
 | `in` | `col IN (?, ?, ...)` | `filter(id__in=[1,2,3])` |
+
+## Range
+
+| Lookup | SQL | Example |
+|--------|-----|---------|
 | `range` | `col BETWEEN ? AND ?` | `filter(views__range=(100,1000))` |
 
 ## Date & Time Transforms
+
 These can be chained with other lookups (e.g. `created_at__year__gte=2024`).
 
 | Transform | SQL | Example |
-|---|---|---|
+|-----------|-----|---------|
 | `date` | `DATE(col) = ?` | `filter(created_at__date=date(2024,1,1))` |
 | `year` | `EXTRACT(YEAR FROM col) = ?` (Postgres) / `YEAR(col) = ?` (MySQL) / `CAST(strftime('%Y', col) AS INTEGER) = ?` (SQLite) | `filter(created_at__year=2024)` |
 | `month` | `EXTRACT(MONTH FROM col) = ?` / `MONTH(col) = ?` / `CAST(strftime('%m', col) AS INTEGER) = ?` | `filter(created_at__month=5)` |
@@ -120,10 +66,11 @@ These can be chained with other lookups (e.g. `created_at__year__gte=2024`).
 | `iso_dow` | `EXTRACT(ISODOW FROM col) = ?` / `((DAYOFWEEK(col) + 5) % 7) + 1 = ?` (MySQL) / `CAST(strftime('%w', col) AS INTEGER) = ?` (SQLite) | `filter(created_at__iso_dow=3)` |
 
 ## JSON Transforms & Lookups
+
 These work on JSONB/JSON fields and can be chained (e.g. `metadata__key__priority__exact="high"`).
 
 | Transform/Lookup | SQL (Postgres) | Example |
-|---|---|---|
+|------------------|----------------|---------|
 | `key` | `(col->>'key')` | `filter(metadata__key__priority__exact="high")` |
 | `key_text` | `(col->>'key')::text` | `filter(metadata__key_text__priority__icontains="urgent")` |
 | `json` | `(col::jsonb)` | `filter(metadata__json__contains={'active': true})` |
@@ -134,7 +81,7 @@ These work on JSONB/JSON fields and can be chained (e.g. `metadata__key__priorit
 
 ## Custom Lookups
 
-Register your own SQL lookups:
+You can register your own SQL lookups:
 
 ```python
 import ryx
@@ -150,8 +97,3 @@ Post.objects.filter(title__ilike="%python%")
 def uuid_prefix_lookup(field, value):
     """{col}::text LIKE ?"""
 ```
-
-## Next Steps
-
-→ **[Q Objects](./q-objects)** — OR and NOT expressions
-→ **[Custom Lookups](/advanced/custom-lookups)** — Advanced lookup patterns
