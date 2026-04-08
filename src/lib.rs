@@ -10,16 +10,16 @@ use tokio::sync::Mutex as TokioMutex;
 pub mod errors;
 pub mod executor;
 pub mod pool;
-pub mod query;
 pub mod transaction;
 
+use crate::errors::RyxError;
 use crate::pool::PoolConfig;
-use crate::query::ast::{
+use ryx_query::ast::{
     AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, OrderByClause, QNode, QueryNode,
     QueryOperation, SqlValue,
 };
-use crate::query::compiler;
-use crate::query::lookups;
+use ryx_query::compiler;
+use ryx_query::lookups;
 use crate::transaction::TransactionHandle;
 
 // ###
@@ -59,12 +59,12 @@ fn setup<'py>(
 
 #[pyfunction]
 fn register_lookup(name: String, sql_template: String) -> PyResult<()> {
-    lookups::register_custom(name, sql_template).map_err(PyErr::from)
+    lookups::register_custom(name, sql_template).map_err(RyxError::from).map_err(PyErr::from)
 }
 
 #[pyfunction]
 fn available_lookups() -> PyResult<Vec<String>> {
-    lookups::registered_lookups().map_err(PyErr::from)
+    lookups::registered_lookups().map_err(RyxError::from).map_err(PyErr::from)
 }
 
 #[pyfunction]
@@ -134,7 +134,7 @@ impl PyQueryBuilder {
     #[new]
     fn new(table: String) -> PyResult<Self> {
         // Get the backend from the pool at QueryBuilder creation time
-        let backend = pool::get_backend().unwrap_or(crate::pool::Backend::PostgreSQL);
+        let backend = pool::get_backend().unwrap_or(ryx_query::Backend::PostgreSQL);
         
         Ok(Self {
             node: QueryNode::select(table).with_backend(backend),
@@ -254,7 +254,7 @@ impl PyQueryBuilder {
     // # Execution methods
 
     fn fetch_all<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let compiled = compiler::compile(&self.node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&self.node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| Ok(decoded_rows_to_py(py, rows)?.unbind()))
@@ -263,7 +263,7 @@ impl PyQueryBuilder {
 
     fn fetch_first<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let node = self.node.clone().with_limit(1);
-        let compiled = compiler::compile(&node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| match rows.into_iter().next() {
@@ -274,7 +274,7 @@ impl PyQueryBuilder {
     }
 
     fn fetch_get<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let compiled = compiler::compile(&self.node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&self.node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let row = executor::fetch_one(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| Ok(decoded_row_to_py(py, row)?.into_any().unbind()))
@@ -284,7 +284,7 @@ impl PyQueryBuilder {
     fn fetch_count<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let mut count_node = self.node.clone();
         count_node.operation = QueryOperation::Count;
-        let compiled = compiler::compile(&count_node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&count_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = executor::fetch_count(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| Ok(count.into_pyobject(py)?.unbind()))
@@ -294,7 +294,7 @@ impl PyQueryBuilder {
     fn fetch_aggregate<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let mut agg_node = self.node.clone();
         agg_node.operation = QueryOperation::Aggregate;
-        let compiled = compiler::compile(&agg_node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&agg_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| match rows.into_iter().next() {
@@ -307,7 +307,7 @@ impl PyQueryBuilder {
     fn execute_delete<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let mut del_node = self.node.clone();
         del_node.operation = QueryOperation::Delete;
-        let compiled = compiler::compile(&del_node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&del_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = executor::execute(compiled).await.map_err(PyErr::from)?;
             Python::attach(|py| Ok(res.rows_affected.into_pyobject(py)?.unbind()))
@@ -328,7 +328,7 @@ impl PyQueryBuilder {
         upd_node.operation = QueryOperation::Update {
             assignments: rust_assignments,
         };
-        let compiled = compiler::compile(&upd_node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&upd_node).map_err(RyxError::from)?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = executor::execute(compiled).await.map_err(PyErr::from)?;
@@ -352,7 +352,7 @@ impl PyQueryBuilder {
             values: rust_values,
             returning_id,
         };
-        let compiled = compiler::compile(&ins_node).map_err(PyErr::from)?;
+        let compiled = compiler::compile(&ins_node).map_err(RyxError::from)?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let res = executor::execute(compiled).await.map_err(PyErr::from)?;
@@ -364,7 +364,7 @@ impl PyQueryBuilder {
     }
 
     fn compiled_sql(&self) -> PyResult<String> {
-        Ok(compiler::compile(&self.node).map_err(PyErr::from)?.sql)
+        Ok(compiler::compile(&self.node).map_err(RyxError::from)?.sql)
     }
 }
 

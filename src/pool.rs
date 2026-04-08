@@ -34,32 +34,7 @@ use sqlx::{
 use tracing::{debug, info};
 
 use crate::errors::{RyxError, RyxResult};
-
-// ###
-// Backend enum
-// ###
-/// Database backend type.
-/// Used for backend-specific SQL generation (e.g., DATE() vs strftime()).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Backend {
-    PostgreSQL,
-    MySQL,
-    SQLite,
-}
-
-/// Detect the backend from a database URL.
-pub fn detect_backend(url: &str) -> Backend {
-    let url_lower = url.to_lowercase();
-    if url_lower.contains("postgres") {
-        Backend::PostgreSQL
-    } else if url_lower.contains("mysql") {
-        Backend::MySQL
-    } else if url_lower.contains("sqlite") {
-        Backend::SQLite
-    } else {
-        Backend::PostgreSQL // default
-    }
-}
+use ryx_query::Backend;
 
 // ###
 // Global singleton
@@ -173,7 +148,7 @@ pub async fn initialize(database_url: &str, config: PoolConfig) -> RyxResult<()>
         .map_err(|_| RyxError::PoolAlreadyInitialized)?;
 
     // Set the backend type based on the URL
-    let backend = detect_backend(database_url);
+    let backend = ryx_query::backend::detect_backend(database_url);
     BACKEND.set(backend).ok();
 
     info!("Ryx connection pool initialized successfully");

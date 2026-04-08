@@ -9,7 +9,7 @@
 // - Other compilation utilities
 // ###
 
-use crate::query::ast::SqlValue;
+use crate::ast::SqlValue;
 
 /// Double-quote a simple identifier (column or table name).
 pub fn quote_col(s: &str) -> String {

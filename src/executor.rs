@@ -45,7 +45,7 @@ use tracing::{debug, instrument};
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;
-use crate::query::{ast::SqlValue, compiler::CompiledQuery};
+use ryx_query::{ast::SqlValue, compiler::CompiledQuery};
 use crate::transaction;
 
 // ###

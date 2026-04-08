@@ -1,6 +1,6 @@
 [package]
 name = "Ryx"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Ryx ORM — a Django-style Python ORM powered by sqlx (Rust) via PyO3"
 license = "MIT OR Apache-2.0"
@@ -32,6 +32,7 @@ mysql = ["sqlx/mysql"]
 sqlite = ["sqlx/sqlite"]
 
 [dependencies]
+ryx-query = { path = "./ryx-query" }
 # ── PyO3 ──────────────────────────────────────────────────────────────────────
 # "extension-module" is required when building a cdylib for Python import.
 # Without it, PyO3 tries to link against libpython, which breaks on Linux/macOS
@@ -86,3 +87,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [dev-dependencies]
 # tokio test macro for async unit tests
 tokio = { version = "1.40", features = ["full", "test-util"] }
+criterion = { version = "0.5", features = ["async_tokio"] }
