@@ -19,7 +19,7 @@ build-backend = "maturin"
 
 [project]
 name = "ryx"
-version = "0.1.2"
+version = "0.1.3"
 description = "A Django-style Python ORM powered by sqlx (Rust) via PyO3."
 readme = "README.md"
 requires-python = ">=3.10"
