@@ -7,10 +7,10 @@
 // These are used for chained lookups like `metadata__key__priority__exact="high"`
 // ###
 
-use crate::pool::Backend;
-use crate::query::lookups::LookupContext;
+use crate::backend::Backend;
+use crate::lookups::LookupContext;
 
-pub use crate::query::lookups::LookupFn;
+pub use crate::lookups::LookupFn;
 
 /// Apply a JSON field transformation.
 /// Returns SQL like `(col->>'key')` or `JSON_UNQUOTE(JSON_EXTRACT(col, '$.key'))`
@@ -103,10 +103,7 @@ pub fn json_has_any(ctx: &LookupContext) -> String {
     match ctx.backend {
         Backend::PostgreSQL => format!("({} ?| ?)", ctx.column),
         Backend::MySQL => format!("JSON_CONTAINS_PATH({}, 'one', (?))", ctx.column),
-        Backend::SQLite => format!(
-            "json_extract({}, '$.' || ?) IS NOT NULL (?)",
-            ctx.column
-        ), // Template
+        Backend::SQLite => format!("json_extract({}, '$.' || ?) IS NOT NULL (?)", ctx.column), // Template
     }
 }
 
@@ -115,10 +112,7 @@ pub fn json_has_all(ctx: &LookupContext) -> String {
     match ctx.backend {
         Backend::PostgreSQL => format!("({} ?& ?)", ctx.column),
         Backend::MySQL => format!("JSON_CONTAINS_PATH({}, 'all', (?))", ctx.column),
-        Backend::SQLite => format!(
-            "json_extract({}, '$.' || ?) IS NOT NULL (?)",
-            ctx.column
-        ), // Template
+        Backend::SQLite => format!("json_extract({}, '$.' || ?) IS NOT NULL (?)", ctx.column), // Template
     }
 }
 

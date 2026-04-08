@@ -6,10 +6,10 @@
 // Contains comparison and string lookups (exact, gt, contains, etc.)
 // ###
 
-use crate::query::lookups::LookupContext;
+use crate::lookups::LookupContext;
 
-pub use crate::query::lookups::LookupFn;
-pub use crate::query::lookups::PythonLookup;
+pub use crate::lookups::LookupFn;
+pub use crate::lookups::PythonLookup;
 
 /// `field__exact=value` → `field = ?`
 ///

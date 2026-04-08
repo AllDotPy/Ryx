@@ -7,15 +7,15 @@
 // See compiler/mod.rs for the module structure.
 // ###
 
-use crate::errors::{RyxError, RyxResult};
-use crate::pool::Backend;
-use crate::query::ast::{
+use crate::ast::{
     AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, QNode, QueryNode, QueryOperation,
     SortDirection, SqlValue,
 };
-use crate::query::lookups::date_lookups as date;
-use crate::query::lookups::json_lookups as json;
-use crate::query::lookups::{self, LookupContext};
+use crate::backend::Backend;
+use crate::errors::{QueryError, QueryResult};
+use crate::lookups::date_lookups as date;
+use crate::lookups::json_lookups as json;
+use crate::lookups::{self, LookupContext};
 
 pub use super::helpers::{apply_like_wrapping, qualified_col, split_qualified, KNOWN_TRANSFORMS};
 
@@ -27,7 +27,7 @@ pub struct CompiledQuery {
     pub values: Vec<SqlValue>,
 }
 
-pub fn compile(node: &QueryNode) -> RyxResult<CompiledQuery> {
+pub fn compile(node: &QueryNode) -> QueryResult<CompiledQuery> {
     let mut values: Vec<SqlValue> = Vec::new();
     let sql = match &node.operation {
         QueryOperation::Select { columns } => {
@@ -49,7 +49,7 @@ fn compile_select(
     node: &QueryNode,
     columns: Option<&[String]>,
     values: &mut Vec<SqlValue>,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     let base_cols = match columns {
         None => "*".to_string(),
         Some(cols) => cols
@@ -129,9 +129,9 @@ fn compile_select(
     Ok(sql)
 }
 
-fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
+fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
     if node.annotations.is_empty() {
-        return Err(RyxError::Internal(
+        return Err(QueryError::Internal(
             "aggregate() called with no aggregate expressions".into(),
         ));
     }
@@ -153,7 +153,7 @@ fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<
     Ok(sql)
 }
 
-fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
+fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
     let mut sql = format!("SELECT COUNT(*) FROM {}", helpers::quote_col(&node.table));
     if !node.joins.is_empty() {
         sql.push(' ');
@@ -168,7 +168,7 @@ fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<Stri
     Ok(sql)
 }
 
-fn compile_delete(node: &QueryNode, values: &mut Vec<SqlValue>) -> RyxResult<String> {
+fn compile_delete(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
     let mut sql = format!("DELETE FROM {}", helpers::quote_col(&node.table));
     let where_sql =
         compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
@@ -183,9 +183,9 @@ fn compile_update(
     node: &QueryNode,
     assignments: &[(String, SqlValue)],
     values: &mut Vec<SqlValue>,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     if assignments.is_empty() {
-        return Err(RyxError::Internal("UPDATE with no assignments".into()));
+        return Err(QueryError::Internal("UPDATE with no assignments".into()));
     }
     let set: Vec<String> = assignments
         .iter()
@@ -213,9 +213,9 @@ fn compile_insert(
     cols_vals: &[(String, SqlValue)],
     returning_id: bool,
     values: &mut Vec<SqlValue>,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     if cols_vals.is_empty() {
-        return Err(RyxError::Internal("INSERT with no values".into()));
+        return Err(QueryError::Internal("INSERT with no values".into()));
     }
     let (cols, vals): (Vec<_>, Vec<_>) = cols_vals.iter().cloned().unzip();
     values.extend(vals);
@@ -318,7 +318,7 @@ pub fn compile_agg_cols(anns: &[AggregateExpr]) -> String {
         .join(", ")
 }
 
-pub fn compile_order_by(clauses: &[crate::query::ast::OrderByClause]) -> String {
+pub fn compile_order_by(clauses: &[crate::ast::OrderByClause]) -> String {
     clauses
         .iter()
         .map(|c| {
@@ -337,7 +337,7 @@ fn compile_where_combined(
     q: Option<&QNode>,
     values: &mut Vec<SqlValue>,
     backend: Backend,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     let flat = if filters.is_empty() {
         None
     } else {
@@ -356,7 +356,7 @@ fn compile_where_combined(
     })
 }
 
-pub fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> RyxResult<String> {
+pub fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> QueryResult<String> {
     match q {
         QNode::Leaf {
             field,
@@ -368,14 +368,14 @@ pub fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> Ryx
             let parts: Vec<String> = children
                 .iter()
                 .map(|c| compile_q(c, values, backend))
-                .collect::<RyxResult<_>>()?;
+                .collect::<QueryResult<_>>()?;
             Ok(format!("({})", parts.join(" AND ")))
         }
         QNode::Or(children) => {
             let parts: Vec<String> = children
                 .iter()
                 .map(|c| compile_q(c, values, backend))
-                .collect::<RyxResult<_>>()?;
+                .collect::<QueryResult<_>>()?;
             Ok(format!("({})", parts.join(" OR ")))
         }
         QNode::Not(child) => {
@@ -389,11 +389,11 @@ fn compile_filters(
     filters: &[FilterNode],
     values: &mut Vec<SqlValue>,
     backend: Backend,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     let parts: Vec<String> = filters
         .iter()
         .map(|f| compile_single_filter(&f.field, &f.lookup, &f.value, f.negated, values, backend))
-        .collect::<RyxResult<_>>()?;
+        .collect::<QueryResult<_>>()?;
     Ok(parts.join(" AND "))
 }
 
@@ -404,7 +404,7 @@ fn compile_single_filter(
     negated: bool,
     values: &mut Vec<SqlValue>,
     backend: Backend,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     let (base_column, applied_transforms, json_key) = if field.contains("__") {
         let parts: Vec<&str> = field.split("__").collect();
 
@@ -533,7 +533,7 @@ fn compile_single_filter(
     if lookup == "range" {
         let (lo, hi) = match value {
             SqlValue::List(v) if v.len() == 2 => (v[0].clone(), v[1].clone()),
-            _ => return Err(RyxError::Internal("range needs exactly 2 values".into())),
+            _ => return Err(QueryError::Internal("range needs exactly 2 values".into())),
         };
         values.push(lo);
         values.push(hi);
@@ -557,24 +557,25 @@ fn compile_single_filter(
 
     if KNOWN_TRANSFORMS.contains(&lookup) {
         let transform_fn = match lookup {
-            "date" => date::date_transform as crate::query::lookups::LookupFn,
-            "year" => date::year_transform as crate::query::lookups::LookupFn,
-            "month" => date::month_transform as crate::query::lookups::LookupFn,
-            "day" => date::day_transform as crate::query::lookups::LookupFn,
-            "hour" => date::hour_transform as crate::query::lookups::LookupFn,
-            "minute" => date::minute_transform as crate::query::lookups::LookupFn,
-            "second" => date::second_transform as crate::query::lookups::LookupFn,
-            "week" => date::week_transform as crate::query::lookups::LookupFn,
-            "dow" => date::dow_transform as crate::query::lookups::LookupFn,
-            "quarter" => date::quarter_transform as crate::query::lookups::LookupFn,
-            "time" => date::time_transform as crate::query::lookups::LookupFn,
-            "iso_week" => date::iso_week_transform as crate::query::lookups::LookupFn,
-            "iso_dow" => date::iso_dow_transform as crate::query::lookups::LookupFn,
-            "key" => json::json_key_transform as crate::query::lookups::LookupFn,
-            "key_text" => json::json_key_text_transform as crate::query::lookups::LookupFn,
-            "json" => json::json_cast_transform as crate::query::lookups::LookupFn,
+            "date" => date::date_transform as crate::lookups::LookupFn,
+            "year" => date::year_transform as crate::lookups::LookupFn,
+            "month" => date::month_transform as crate::lookups::LookupFn,
+            "day" => date::day_transform as crate::lookups::LookupFn,
+            "hour" => date::hour_transform as crate::lookups::LookupFn,
+            "minute" => date::minute_transform as crate::lookups::LookupFn,
+            "second" => date::second_transform as crate::lookups::LookupFn,
+            "week" => date::week_transform as crate::lookups::LookupFn,
+            "dow" => date::dow_transform as crate::lookups::LookupFn,
+            "quarter" => date::quarter_transform as crate::lookups::LookupFn,
+            "time" => date::time_transform as crate::lookups::LookupFn,
+            "iso_week" => date::iso_week_transform as crate::lookups::LookupFn,
+            "iso_dow" => date::iso_dow_transform as crate::lookups::LookupFn,
+            "key" => json::json_key_transform as crate::lookups::LookupFn,
+            "key_text" => json::json_key_text_transform as crate::lookups::LookupFn,
+            "json" => json::json_cast_transform as crate::lookups::LookupFn,
+
             _ => {
-                return Err(RyxError::UnknownLookup {
+                return Err(QueryError::UnknownLookup {
                     field: field.to_string(),
                     lookup: lookup.to_string(),
                 })
@@ -597,7 +598,7 @@ fn compile_single_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::query::ast::*;
+    use crate::ast::*;
 
     #[test]
     fn test_bare_select() {
@@ -699,6 +700,6 @@ mod tests {
     }
 
     fn init_registry() {
-        crate::query::lookups::init_registry();
+        crate::lookups::init_registry();
     }
 }

@@ -10,13 +10,14 @@
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
-use crate::errors::{RyxError, RyxResult};
-use crate::pool::Backend;
+// Removed unused SqlValue import
+use crate::backend::Backend;
+use crate::errors::{QueryError, QueryResult};
 
 // Re-export submodules
-pub use crate::query::lookups::common_lookups;
-pub use crate::query::lookups::date_lookups;
-pub use crate::query::lookups::json_lookups;
+pub use crate::lookups::common_lookups;
+pub use crate::lookups::date_lookups;
+pub use crate::lookups::json_lookups;
 
 // ###
 // Core types
@@ -109,14 +110,17 @@ pub fn init_registry() {
 // Registry public API
 // ###
 
-pub fn register_custom(name: impl Into<String>, sql_template: impl Into<String>) -> RyxResult<()> {
+pub fn register_custom(
+    name: impl Into<String>,
+    sql_template: impl Into<String>,
+) -> QueryResult<()> {
     let registry = REGISTRY
         .get()
-        .ok_or_else(|| RyxError::Internal("Lookup registry not initialized".into()))?;
+        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
 
     let mut guard = registry
         .write()
-        .map_err(|e| RyxError::Internal(format!("Registry lock poisoned: {e}")))?;
+        .map_err(|e| QueryError::Internal(format!("Registry lock poisoned: {e}")))?;
 
     guard.custom.insert(
         name.into(),
@@ -128,14 +132,14 @@ pub fn register_custom(name: impl Into<String>, sql_template: impl Into<String>)
     Ok(())
 }
 
-fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult<String> {
+fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> QueryResult<String> {
     let registry = REGISTRY
         .get()
-        .ok_or_else(|| RyxError::Internal("Lookup registry not initialized".into()))?;
+        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
 
     let guard = registry
         .read()
-        .map_err(|e| RyxError::Internal(format!("Registry lock poisoned: {e}")))?;
+        .map_err(|e| QueryError::Internal(format!("Registry lock poisoned: {e}")))?;
 
     if let Some(custom) = guard.custom.get(lookup_name) {
         return Ok(custom.sql_template.replace("{col}", &ctx.column));
@@ -145,7 +149,7 @@ fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxRes
         return Ok(lookup_fn(ctx));
     }
 
-    Err(RyxError::UnknownLookup {
+    Err(QueryError::UnknownLookup {
         field: field.to_string(),
         lookup: lookup_name.to_string(),
     })
@@ -153,20 +157,20 @@ fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxRes
 
 /// Returns the list of all registered lookup names (built-in + custom).
 /// Used by the Python layer for available_lookups().
-pub fn registered_lookups() -> RyxResult<Vec<String>> {
+pub fn registered_lookups() -> QueryResult<Vec<String>> {
     let registry = REGISTRY
         .get()
-        .ok_or_else(|| RyxError::Internal("Lookup registry not initialized".into()))?;
+        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
 
     let guard = registry
         .read()
-        .map_err(|e| RyxError::Internal(format!("Registry lock poisoned: {e}")))?;
+        .map_err(|e| QueryError::Internal(format!("Registry lock poisoned: {e}")))?;
 
     let mut names: Vec<String> = guard
         .builtin
         .keys()
         .copied()
-        .map(|k| k.to_string())
+        .map(|k: &'static str| k.to_string())
         .chain(guard.custom.keys().cloned())
         .collect();
     names.sort();
@@ -242,7 +246,7 @@ fn handle_sqlite_transform_lookup(
     _transform: &str,
     lookup_name: &str,
     ctx: &LookupContext,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     let is_numeric_comparison = matches!(lookup_name, "gt" | "gte" | "lt" | "lte" | "exact");
 
     if is_numeric_comparison && ctx.column.contains("AS TEXT)") {
@@ -270,7 +274,7 @@ fn add_sqlite_cast_for_transform(fragment: &str, lookup: &str) -> String {
     }
 }
 
-pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxResult<String> {
+pub fn resolve(field: &str, lookup_name: &str, ctx: &LookupContext) -> QueryResult<String> {
     if !lookup_name.contains("__") {
         if ctx.json_key.is_some() {
             let mut column = format!("\"{}\"", field);
@@ -381,7 +385,7 @@ pub fn apply_transform(
     column: &str,
     backend: Backend,
     key: Option<&str>,
-) -> RyxResult<String> {
+) -> QueryResult<String> {
     if let Some(sql) = date_lookups::apply_date_transform(name, column, backend) {
         return Ok(sql);
     }
@@ -393,7 +397,7 @@ pub fn apply_transform(
         return Ok(format!("DATE({})", column));
     }
 
-    Err(RyxError::UnknownLookup {
+    Err(QueryError::UnknownLookup {
         field: column.to_string(),
         lookup: name.to_string(),
     })

@@ -23,6 +23,7 @@
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use ryx_query::QueryError;
 use thiserror::Error;
 
 /// The master error type for the entire Ryx ORM.
@@ -38,6 +39,10 @@ pub enum RyxError {
     /// tracing/logging can capture the full details.
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
+
+    /// Errors from the query compiler.
+    #[error("Query error: {0}")]
+    Query(#[from] QueryError),
 
     /// Raised when `.get()` or `.first()` finds no matching row.
     /// Mirrors Django's `Model.DoesNotExist`.
@@ -59,27 +64,6 @@ pub enum RyxError {
     /// calls `Ryx.setup()` a second time with a different URL.
     #[error("Connection pool already initialized")]
     PoolAlreadyInitialized,
-
-    // Query building errors
-    /// Raised when the Python side passes an unrecognized lookup suffix.
-    /// Example: `filter(age__foobar=42)` where "foobar" is not a registered
-    /// lookup. We include the lookup name so the error is actionable.
-    #[error("Unknown lookup: '{lookup}' on field '{field}'")]
-    UnknownLookup { field: String, lookup: String },
-
-    /// Raised when a field name referenced in a filter/order_by doesn't exist
-    /// on the model's declared schema.
-    #[error("Unknown field '{field}' on model '{model}'")]
-    UnknownField { field: String, model: String },
-
-    /// Raised when a Python value cannot be converted to the expected SQL type.
-    /// Example: passing a string where an integer is expected.
-    #[error("Type mismatch for field '{field}': expected {expected}, got {got}")]
-    TypeMismatch {
-        field: String,
-        expected: String,
-        got: String,
-    },
 
     // Runtime / internal errors
     /// Catch-all for internal errors that shouldn't reach users but are
@@ -107,13 +91,12 @@ pub enum RyxError {
 impl From<RyxError> for PyErr {
     fn from(err: RyxError) -> PyErr {
         match &err {
-            // User errors (bad field names, bad lookups, bad types) →
-            // ValueError so Python linters/type checkers can catch them
-            RyxError::UnknownLookup { .. }
-            | RyxError::UnknownField { .. }
-            | RyxError::TypeMismatch { .. } => PyValueError::new_err(err.to_string()),
-
-            // Everything else → RuntimeError with full context message
+            RyxError::Query(qe) => match qe {
+                QueryError::UnknownLookup { .. }
+                | QueryError::UnknownField { .. }
+                | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+                QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
+            },
             _ => PyRuntimeError::new_err(err.to_string()),
         }
     }

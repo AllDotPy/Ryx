@@ -35,8 +35,8 @@ use tracing::{debug, instrument};
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;
-use crate::query::ast::SqlValue;
-use crate::query::compiler::CompiledQuery;
+use ryx_query::ast::SqlValue;
+use ryx_query::compiler::CompiledQuery;
 
 static ACTIVE_TX: OnceCell<StdMutex<Option<Arc<Mutex<Option<TransactionHandle>>>>>> =
     OnceCell::new();
@@ -137,7 +137,7 @@ impl TransactionHandle {
     ///
     /// The query is run on the transaction's connection (not the pool), so it
     /// participates in the current transaction boundary.
-    #[instrument(skip(self, query), fields(sql = %query.sql))]
+    // #[instrument(skip(self, query), fields(sql = %query.sql))]
     pub async fn execute_query(&self, query: CompiledQuery) -> RyxResult<u64> {
         let mut guard = self.inner.lock().await;
         let tx = guard.as_mut().ok_or_else(|| {

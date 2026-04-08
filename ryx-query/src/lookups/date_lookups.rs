@@ -7,10 +7,10 @@
 // These are used for chained lookups like `created_at__year__gte=2024`
 // ###
 
-use crate::pool::Backend;
-use crate::query::lookups::LookupContext;
+use crate::backend::Backend;
+use crate::lookups::LookupContext;
 
-pub use crate::query::lookups::LookupFn;
+pub use crate::lookups::LookupFn;
 
 /// Apply a date/time field transformation.
 /// Returns SQL like "DATE(col)" or "EXTRACT(YEAR FROM col)"

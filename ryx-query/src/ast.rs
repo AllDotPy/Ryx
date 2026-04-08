@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::pool::Backend;
+use crate::Backend;
 
 // ###
 // SqlValue — a Python-safe, DB-bindable value

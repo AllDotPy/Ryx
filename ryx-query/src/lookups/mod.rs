@@ -27,10 +27,10 @@ pub use lookups::LookupFn;
 pub use lookups::PythonLookup;
 
 // Re-export functions from lookups.rs
+pub use lookups::all_lookups;
+pub use lookups::all_transforms;
 pub use lookups::apply_transform;
 pub use lookups::init_registry;
 pub use lookups::register_custom;
 pub use lookups::registered_lookups;
 pub use lookups::resolve;
-pub use lookups::all_lookups;
-pub use lookups::all_transforms;
