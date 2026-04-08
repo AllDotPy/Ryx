@@ -68,7 +68,18 @@ fn available_lookups() -> PyResult<Vec<String>> {
 }
 
 #[pyfunction]
-fn is_connected() -> bool {
+fn list_lookups<'py>() -> Vec<&'static str> {
+    lookups::all_lookups().to_vec()
+}
+
+#[pyfunction]
+fn list_transforms() -> Vec<&'static str> {
+    lookups::all_transforms().to_vec()
+}
+
+
+#[pyfunction]
+fn is_connected(py: Python<'_>) -> bool {
     pool::is_initialized()
 }
 
@@ -825,6 +836,10 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(register_lookup, m)?)?;
     m.add_function(wrap_pyfunction!(available_lookups, m)?)?;
+    m.add_function(wrap_pyfunction!(list_lookups, m)?)?;
+    m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
+    m.add_function(wrap_pyfunction!(list_lookups, m)?)?;
+    m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
     m.add_function(wrap_pyfunction!(is_connected, m)?)?;
     m.add_function(wrap_pyfunction!(pool_stats, m)?)?;
     m.add_function(wrap_pyfunction!(raw_fetch, m)?)?;
