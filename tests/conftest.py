@@ -224,6 +224,12 @@ def _import_ryx_components():
             MemoryCache,
             configure_cache,
             invalidate_model,
+            JSONField,
+            MigrationRunner,
+            RyxError,
+            DatabaseError,
+            DoesNotExist,
+            MultipleObjectsReturned,
         )
         from ryx.migrations import MigrationRunner
         from ryx.exceptions import (
@@ -265,6 +271,7 @@ def _import_ryx_components():
             MemoryCache,
             configure_cache,
             invalidate_model,
+            JSONField,
             MigrationRunner,
             RyxError,
             DatabaseError,
@@ -272,52 +279,7 @@ def _import_ryx_components():
             MultipleObjectsReturned,
         )
     except ImportError:
-        return (
-            False,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+        return (False,) + (None,) * 36
 
 
 (
@@ -352,6 +314,7 @@ def _import_ryx_components():
     MemoryCache_import,
     configure_cache_import,
     invalidate_model_import,
+    JSONField_import,
     MigrationRunner_import,
     RyxError_import,
     DatabaseError_import,
@@ -391,11 +354,33 @@ if RUST_AVAILABLE:
     MemoryCache = MemoryCache_import
     configure_cache = configure_cache_import
     invalidate_model = invalidate_model_import
+    JSONField = JSONField_import
     MigrationRunner = MigrationRunner_import
     RyxError = RyxError_import
     DatabaseError = DatabaseError_import
     DoesNotExist = DoesNotExist_import
     MultipleObjectsReturned = MultipleObjectsReturned_import
+else:
+
+    class Dummy:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __call__(self, *args, **kwargs):
+            return Dummy()
+
+    Model = Dummy
+    CharField = IntField = BooleanField = TextField = DateTimeField = FloatField = (
+        DecimalField
+    ) = UUIDField = EmailField = ForeignKey = Index = Constraint = ValidationError = (
+        Q
+    ) = Count = Sum = Avg = Min = Max = transaction = run_sync = bulk_create = (
+        bulk_update
+    ) = bulk_delete = stream = MemoryCache = configure_cache = invalidate_model = (
+        JSONField
+    ) = MigrationRunner = RyxError = DatabaseError = DoesNotExist = (
+        MultipleObjectsReturned
+    ) = Dummy
 
 
 @pytest.fixture(scope="session")
@@ -437,7 +422,7 @@ def setup_database():
     asyncio.run(ryx.setup(db_url))
 
     # Run migrations against test models so tables exist for integration tests
-    runner = MigrationRunner([Author, Post, Tag, PostTag])
+    runner = MigrationRunner([Author, Post, Tag, PostTag, Profile])
     asyncio.run(runner.migrate())
 
     yield
@@ -510,6 +495,14 @@ class PostTag(Model):
 
     post = ForeignKey(Post, on_delete="CASCADE")
     tag = ForeignKey(Tag, on_delete="CASCADE")
+
+
+class Profile(Model):
+    class Meta:
+        table_name = "test_profiles"
+
+    user_name = CharField(max_length=100)
+    data = JSONField(null=True)
 
 
 @pytest.fixture(scope="function", autouse=True)
