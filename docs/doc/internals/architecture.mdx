@@ -7,7 +7,7 @@ sidebar_position: 2
 Ryx is built in three layers, each with a clear responsibility.
 
 ## Layer Diagram
-
+ 
 ```
 ┌──────────────────────────────────────────────────────────┐
 │  Python Layer  (ryx/)                                    │
@@ -17,8 +17,11 @@ Ryx is built in three layers, each with a clear responsibility.
 │  PyO3 Boundary  (src/lib.rs)                             │
 │  QueryBuilder · TransactionHandle · Type Bridge · Async  │
 ├──────────────────────────────────────────────────────────┤
-│  Rust Core  (src/)                                       │
-│  AST · Q-Trees · SQL Compiler · Executor · Pool · Tx     │
+│  Modular Query Engine (ryx-query crate)                  │
+│  AST · Q-Trees · SQL Compiler · Lookup Registry          │
+├──────────────────────────────────────────────────────────┤
+│  Rust Core (src/)                                        │
+│  Executor · Pool · Transaction Logic                     │
 ├──────────────────────────────────────────────────────────┤
 │  sqlx 0.8.6  +  tokio 1.40                               │
 │  AnyPool · Async Drivers · Transactions                  │
@@ -26,6 +29,7 @@ Ryx is built in three layers, each with a clear responsibility.
 │  PostgreSQL · MySQL · SQLite                             │
 └──────────────────────────────────────────────────────────┘
 ```
+
 
 ## Query Execution Flow
 
