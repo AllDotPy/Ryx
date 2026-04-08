@@ -187,39 +187,95 @@ class TestDateTimeEdgeCases:
         assert len(results) == 3
 
 
-class TestJSONFieldLookups:
-    """Integration tests for JSON field lookups."""
+class TestJSONAdvancedLookupsIntegration:
+    """Integration tests for advanced JSON lookups (has_key, has_any, has_all)."""
+
+    @pytest.fixture
+    async def profiles_with_data(self, clean_tables):
+        """Create profiles with various JSON data for testing."""
+        from conftest import Profile
+
+        await Profile.objects.create(
+            user_name="User 1",
+            data={"verified": True, "role": "admin", "tags": ["beta", "staff"]},
+        )
+        await Profile.objects.create(
+            user_name="User 2",
+            data={"verified": True, "role": "user", "tags": ["beta"]},
+        )
+        await Profile.objects.create(
+            user_name="User 3", data={"role": "guest", "tags": ["new"]}
+        )
+        await Profile.objects.create(user_name="User 4", data=None)
 
     @pytest.mark.asyncio
-    async def test_json_has_key_lookup(self, clean_tables):
-        """Test metadata__has_key lookup."""
-        # Create author with bio as JSON-like text (using TextField for simplicity)
-        await Author.objects.create(
-            name="Author with Bio",
-            email="author@test.com",
-            bio='{"verified": true, "role": "admin"}',
-        )
-        await Author.objects.create(
-            name="Author without Bio", email="author2@test.com", bio=None
-        )
+    async def test_has_key_lookup(self, profiles_with_data):
+        """Test has_key lookup."""
+        from conftest import Profile
 
-        # Note: has_key requires actual JSON field - this tests TextField behavior
-        # The lookup may not work as expected with TextField
-        # This test verifies the lookup doesn't error but may not filter correctly
+        # User 1, 2, 3 have 'role'
+        results = await Profile.objects.filter(data__has_key="role")
+        assert len(results) == 3
+
+        # Only User 1, 2 have 'verified'
+        results = await Profile.objects.filter(data__has_key="verified")
+        assert len(results) == 2
+
+        # No one has 'missing_key'
+        results = await Profile.objects.filter(data__has_key="missing_key")
+        assert len(results) == 0
 
     @pytest.mark.asyncio
-    async def test_json_key_lookups_text_field(self, clean_tables):
-        """Test JSON key lookups work on TextField (for compatibility)."""
-        # Create authors with pseudo-JSON in text fields
-        await Author.objects.create(
-            name="Author 1", email="a1@test.com", bio='{"priority": "high"}'
-        )
-        await Author.objects.create(
-            name="Author 2", email="a2@test.com", bio='{"priority": "low"}'
-        )
+    async def test_has_any_lookup(self, profiles_with_data):
+        """Test has_any lookup."""
+        from conftest import Profile
 
-        # This tests that the lookup mechanism works
-        # Actual JSON extraction requires JSONField
+        # User 1, 2, 3 have either 'role' or 'verified'
+        results = await Profile.objects.filter(data__has_any=["role", "verified"])
+        assert len(results) == 3
+
+        # User 1, 2 have either 'verified' or 'admin_status'
+        results = await Profile.objects.filter(
+            data__has_any=["verified", "admin_status"]
+        )
+        assert len(results) == 2
+
+        # No one has either 'missing1' or 'missing2'
+        results = await Profile.objects.filter(data__has_any=["missing1", "missing2"])
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_has_all_lookup(self, profiles_with_data):
+        """Test has_all lookup."""
+        from conftest import Profile
+
+        # User 1, 2 have both 'role' and 'verified'
+        results = await Profile.objects.filter(data__has_all=["role", "verified"])
+        assert len(results) == 2
+
+        # Only User 1 has both 'role' and 'verified' and 'tags'
+        results = await Profile.objects.filter(
+            data__has_all=["role", "verified", "tags"]
+        )
+        assert len(results) == 2  # User 1 and 2 have these
+
+        # No one has both 'verified' and 'missing_key'
+        results = await Profile.objects.filter(
+            data__has_all=["verified", "missing_key"]
+        )
+        assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_json_lookup_negation(self, profiles_with_data):
+        """Test negated JSON lookups."""
+        from conftest import Profile
+
+        # Not having 'verified' -> User 3 and User 4
+        results = await Profile.objects.exclude(data__has_key="verified")
+        assert len(results) == 2
+        titles = [r.user_name for r in results]
+        assert "User 3" in titles
+        assert "User 4" in titles
 
 
 class TestJSONDynamicKeyLookups:
