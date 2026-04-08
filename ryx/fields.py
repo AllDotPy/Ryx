@@ -29,7 +29,7 @@ from ryx.validators import (
 if TYPE_CHECKING:
     from ryx.models import Model
 
-# Deferred reverse FK descriptor registry 
+# Deferred reverse FK descriptor registry
 # Forward-reference FK targets (string names) can't install ReverseFKDescriptors
 # immediately at class-definition time because the target class may not exist yet.
 # We accumulate (target_ref, rel_name, source_model, fk_attname) tuples here
@@ -55,7 +55,7 @@ def resolve_pending_reverse_fks() -> None:
     import sys
 
     still_pending = []
-    for (target_ref, rel_name, source_model, fk_attname) in _pending_reverse_fk:
+    for target_ref, rel_name, source_model, fk_attname in _pending_reverse_fk:
         try:
             target_model = _resolve_model(target_ref, source_model)
             if not hasattr(target_model, rel_name):
@@ -68,6 +68,7 @@ def resolve_pending_reverse_fks() -> None:
 
     _pending_reverse_fk.clear()
     _pending_reverse_fk.extend(still_pending)
+
 
 _MISSING = object()
 
@@ -98,10 +99,16 @@ class Field:
     unique_for_date:str    — Field name — enforce uniqueness per date value.
     unique_for_month:str   — Field name — enforce uniqueness per month value.
     unique_for_year : str  — Field name — enforce uniqueness per year value.
+
+    SUPPORTED_LOOKUPS: list[str] — Lookups allowed on this field.
+    SUPPORTED_TRANSFORMS: list[str] — Transforms allowed on this field.
     """
 
+    SUPPORTED_LOOKUPS: list[str] = []
+    SUPPORTED_TRANSFORMS: list[str] = []
+
     attname: str = ""
-    column:  str = ""
+    column: str = ""
     model: Optional[Type["Model"]] = None
 
     def __init__(
@@ -109,15 +116,15 @@ class Field:
         *,
         null: bool = False,
         blank: bool = False,
-        default: Any  = _MISSING,
+        default: Any = _MISSING,
         primary_key: bool = False,
         unique: bool = False,
         db_index: bool = False,
         choices: Optional[Sequence] = None,
         validators: Optional[List[Validator]] = None,
         editable: bool = True,
-        help_text: str  = "",
-        verbose_name: str  = "",
+        help_text: str = "",
+        verbose_name: str = "",
         db_column: Optional[str] = None,
         unique_for_date: Optional[str] = None,
         unique_for_month: Optional[str] = None,
@@ -151,7 +158,7 @@ class Field:
         # Not null
         if not self.null and not self.primary_key:
             self._validators.insert(0, NotNullValidator())
-        
+
         # Choices
         if self.choices:
             # Extract just the values from (value, label) pairs if necessary
@@ -165,7 +172,7 @@ class Field:
     # Descriptor protocol
     def __set_name__(self, owner: type, name: str) -> None:
         self.attname = name
-        self.column  = self._db_column or name
+        self.column = self._db_column or name
 
     def __get__(self, obj: Optional["Model"], objtype: Optional[type] = None) -> Any:
         if obj is None:
@@ -182,9 +189,7 @@ class Field:
         self.model = model
 
     def db_type(self) -> str:
-        raise NotImplementedError(
-            f"{type(self).__name__}.db_type() not implemented"
-        )
+        raise NotImplementedError(f"{type(self).__name__}.db_type() not implemented")
 
     def to_python(self, value: Any) -> Any:
         return value
@@ -199,6 +204,22 @@ class Field:
 
     def has_default(self) -> bool:
         return self.default is not _MISSING
+
+    def _validate_lookup(self, lookup: str) -> None:
+        """Verify that the lookup is supported by this field type."""
+        if lookup not in self.SUPPORTED_LOOKUPS:
+            raise ValueError(
+                f"Lookup '{lookup}' is not supported on {type(self).__name__}. "
+                f"Supported lookups: {', '.join(self.SUPPORTED_LOOKUPS)}"
+            )
+
+    def _validate_transform(self, transform: str) -> None:
+        """Verify that the transform is supported by this field type."""
+        if transform not in self.SUPPORTED_TRANSFORMS:
+            raise ValueError(
+                f"Transform '{transform}' is not supported on {type(self).__name__}. "
+                f"Supported transforms: {', '.join(self.SUPPORTED_TRANSFORMS)}"
+            )
 
     def validate(self, value: Any) -> None:
         """Run all validators on ``value``.
@@ -217,7 +238,7 @@ class Field:
 
     def clean(self, value: Any) -> Any:
         """Validate and return the cleaned value.
-        
+
         This is a convenience method that validates the value and returns it
         if validation passes.
         """
@@ -253,13 +274,13 @@ class AutoField(Field):
         kw.setdefault("editable", False)
         super().__init__(**kw)
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "INTEGER"
-    
-    def to_python(self, v): 
+
+    def to_python(self, v):
         return None if v is None else int(v)
 
-    def _build_implicit_validators(self): 
+    def _build_implicit_validators(self):
         pass  # PK never needs NotNullValidator
 
 
@@ -268,7 +289,8 @@ class AutoField(Field):
 #####
 class BigAutoField(AutoField):
     """64-bit auto-increment PK."""
-    def db_type(self) -> str: 
+
+    def db_type(self) -> str:
         return "BIGINT"
 
 
@@ -277,7 +299,8 @@ class BigAutoField(AutoField):
 #####
 class SmallAutoField(AutoField):
     """16-bit auto-increment PK."""
-    def db_type(self) -> str: 
+
+    def db_type(self) -> str:
         return "SMALLINT"
 
 
@@ -289,6 +312,9 @@ class IntField(Field):
 
     Extra kwargs: ``min_value``, ``max_value``.
     """
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
 
     def __init__(
         self, 
@@ -312,13 +338,17 @@ class IntField(Field):
     
     def to_python(self, v): 
         return None if v is None else int(v)
-
+    
 
 ####
 ###     SMALL INTEGER FIELD
 #####
 class SmallIntField(IntField):
     """16-bit integer (SMALLINT)."""
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
+
     def db_type(self) -> str: 
         return "SMALLINT"
 
@@ -328,6 +358,10 @@ class SmallIntField(IntField):
 #####
 class BigIntField(IntField):
     """64-bit integer (BIGINT)."""
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
+
     def db_type(self) -> str: 
         return "BIGINT"
 
@@ -337,6 +371,9 @@ class BigIntField(IntField):
 #####
 class PositiveIntField(IntField):
     """Integer that must be >= 0."""
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
 
     def __init__(self, **kw):
         kw.setdefault("min_value", 0)
@@ -350,6 +387,9 @@ class PositiveIntField(IntField):
 #####
 class FloatField(Field):
     """Double-precision float. Extra kwargs: ``min_value``, ``max_value``."""
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
 
     def __init__(self, *, min_value=None, max_value=None, **kw):
         super().__init__(**kw)
@@ -372,6 +412,9 @@ class FloatField(Field):
 #####
 class DecimalField(Field):
     """Fixed-precision decimal (NUMERIC). Extra kwargs: ``min_value``, ``max_value``."""
+
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = []
 
     def __init__(
         self, 
@@ -407,15 +450,21 @@ class DecimalField(Field):
 #####
 class BooleanField(Field):
     """Boolean (BOOLEAN)."""
-    def db_type(self) -> str: return "BOOLEAN"
+
+    SUPPORTED_LOOKUPS = ["exact", "isnull"]
+    SUPPORTED_TRANSFORMS = []
+
+    def db_type(self) -> str:
+        return "BOOLEAN"
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
         if isinstance(v, str):
             v_lower = v.lower()
-            if v_lower in ('true', '1', 'yes', 'on'):
+            if v_lower in ("true", "1", "yes", "on"):
                 return True
-            elif v_lower in ('false', '0', 'no', 'off', ''):
+            elif v_lower in ("false", "0", "no", "off", ""):
                 return False
         return bool(v)
 
@@ -425,6 +474,7 @@ class BooleanField(Field):
 #####
 class NullBooleanField(BooleanField):
     """Nullable boolean. Equivalent to BooleanField(null=True)."""
+
     def __init__(self, **kw):
         kw.setdefault("null", True)
         super().__init__(**kw)
@@ -443,19 +493,33 @@ class CharField(Field):
         strip       : bool — Strip leading/trailing whitespace (default: True).
     """
 
+    SUPPORTED_LOOKUPS = [
+        "exact",
+        "contains",
+        "icontains",
+        "startswith",
+        "istartswith",
+        "endswith",
+        "iendswith",
+        "in",
+        "range",
+        "isnull",
+    ]
+    SUPPORTED_TRANSFORMS = []
+
     def __init__(
-        self, 
-        *, 
-        max_length: int = 255, 
+        self,
+        *,
+        max_length: int = 255,
         min_length: Optional[int] = None,
-        strip: bool = True, 
-        **kw
+        strip: bool = True,
+        **kw,
     ):
         self._strip = strip
         self.max_length = max_length
         self.min_length = min_length
         super().__init__(**kw)
-        
+
         # Max length validator
         self._validators.append(MaxLengthValidator(max_length))
         if min_length is not None:
@@ -464,11 +528,11 @@ class CharField(Field):
         if not self.blank and not self.null:
             self._validators.append(NotBlankValidator())
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return f"VARCHAR({self.max_length})"
-    
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
         s = str(v)
         return s.strip() if self._strip else s
@@ -481,8 +545,7 @@ class SlugField(CharField):
     """CharField that validates slug format (letters, digits, hyphens, underscores)."""
 
     _SLUG_RE = RegexValidator(
-        r"^[-\w]+$", 
-        "Enter a valid slug (letters, digits, hyphens, underscores)."
+        r"^[-\w]+$", "Enter a valid slug (letters, digits, hyphens, underscores)."
     )
 
     def __init__(self, **kw):
@@ -520,10 +583,8 @@ class URLField(CharField):
 #####
 class IPAddressField(CharField):
     """CharField for IPv4 addresses."""
-    _IP_RE = RegexValidator(
-        r"^(\d{1,3}\.){3}\d{1,3}$",
-        "Enter a valid IPv4 address."
-    )
+
+    _IP_RE = RegexValidator(r"^(\d{1,3}\.){3}\d{1,3}$", "Enter a valid IPv4 address.")
 
     def __init__(self, **kw):
         kw.setdefault("max_length", 15)
@@ -537,24 +598,30 @@ class IPAddressField(CharField):
 class TextField(Field):
     """Unbounded text (TEXT). Extra kwargs: ``min_length``, ``max_length``."""
 
-    def __init__(self, *, min_length: Optional[int] = None, max_length: Optional[int] = None, **kw):
+    def __init__(
+        self,
+        *,
+        min_length: Optional[int] = None,
+        max_length: Optional[int] = None,
+        **kw,
+    ):
         super().__init__(**kw)
 
         self.max_length = max_length
 
         if min_length is not None:
             self._validators.append(MinLengthValidator(min_length))
-        
+
         if max_length is not None:
             self._validators.append(MaxLengthValidator(max_length))
 
         if not self.blank and not self.null:
             self._validators.append(NotBlankValidator())
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "TEXT"
-    
-    def to_python(self, v): 
+
+    def to_python(self, v):
         return None if v is None else str(v)
 
 
@@ -564,13 +631,13 @@ class TextField(Field):
 class BinaryField(Field):
     """Binary blob field (BYTEA / BLOB)."""
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "BYTEA"
-    
-    def to_python(self, v): 
+
+    def to_python(self, v):
         return v
-    
-    def _build_implicit_validators(self): 
+
+    def _build_implicit_validators(self):
         pass  # binary content — skip NotBlankValidator
 
 
@@ -580,13 +647,20 @@ class BinaryField(Field):
 class DateField(Field):
     """Date only (DATE). Extra kwargs: ``auto_now``, ``auto_now_add``."""
 
-    def __init__(
-        self, 
-        *, 
-        auto_now: bool = False, 
-        auto_now_add: bool = False, 
-        **kw
-    ):
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = [
+        "date",
+        "year",
+        "month",
+        "day",
+        "week",
+        "dow",
+        "quarter",
+        "iso_week",
+        "iso_dow",
+    ]
+
+    def __init__(self, *, auto_now: bool = False, auto_now_add: bool = False, **kw):
         self.auto_now = auto_now
         self.auto_now_add = auto_now_add
 
@@ -594,27 +668,23 @@ class DateField(Field):
             kw.setdefault("editable", False)
         super().__init__(**kw)
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "DATE"
-    
+
     def to_python(self, v):
-        # Null value
-        if v is None: 
+        if v is None:
             return None
-        
-        # Already a date/datetime
-        if isinstance(v, datetime): 
+        if isinstance(v, datetime):
             return v.date()
-        
-        if isinstance(v, date):     
+        if isinstance(v, date):
             return v
-        
         return date.fromisoformat(str(v))
-    
-    def to_db(self, v): 
-        return None if v is None else (
-            v.isoformat() 
-            if isinstance(v, (date, datetime)) else str(v)
+
+    def to_db(self, v):
+        return (
+            None
+            if v is None
+            else (v.isoformat() if isinstance(v, (date, datetime)) else str(v))
         )
 
 
@@ -624,12 +694,29 @@ class DateField(Field):
 class DateTimeField(Field):
     """Timestamp (TIMESTAMP). Extra kwargs: ``auto_now``, ``auto_now_add``."""
 
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+    SUPPORTED_TRANSFORMS = [
+        "date",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "minute",
+        "second",
+        "week",
+        "dow",
+        "quarter",
+        "time",
+        "iso_week",
+        "iso_dow",
+    ]
+
     def __init__(
-        self, 
-        *, 
-        auto_now: bool = False, 
-        auto_now_add: bool = False, 
-        **kw
+        self,
+        *,
+        auto_now: bool = False,
+        auto_now_add: bool = False,
+        **kw,
     ):
         self.auto_now = auto_now
         self.auto_now_add = auto_now_add
@@ -638,28 +725,22 @@ class DateTimeField(Field):
             kw.setdefault("editable", False)
         super().__init__(**kw)
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "TIMESTAMP"
-    
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
-        if isinstance(v, datetime): 
+        if isinstance(v, datetime):
             return v
         return datetime.fromisoformat(str(v))
-    
+
     def to_db(self, v):
         if v is None:
             return None
         if isinstance(v, datetime):
-            return v.strftime('%Y-%m-%dT%H:%M:%S.%f')
+            return v.strftime("%Y-%m-%dT%H:%M:%S.%f")
         return str(v)
-    
-    # def to_db(self, v): 
-    #     return None if v is None else (
-    #         v.isoformat() 
-    #         if isinstance(v, datetime) else str(v)
-    #     )
 
 
 ####
@@ -668,15 +749,15 @@ class DateTimeField(Field):
 class TimeField(Field):
     """Time only (TIME)."""
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "TIME"
-    
+
     def to_python(self, v):
         from datetime import time
-        if v is None: 
+
+        if v is None:
             return None
-        
-        if isinstance(v, time): 
+        if isinstance(v, time):
             return v
         return time.fromisoformat(str(v))
 
@@ -687,23 +768,19 @@ class TimeField(Field):
 class DurationField(Field):
     """Python timedelta stored as BIGINT (microseconds)."""
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "BIGINT"
-    
+
     def to_python(self, v):
-        
-        if v is None: 
+        if v is None:
             return None
-        
-        if isinstance(v, timedelta): 
+        if isinstance(v, timedelta):
             return v
-        
         return timedelta(microseconds=int(v))
-    
+
     def to_db(self, v):
-        if v is None: 
+        if v is None:
             return None
-        
         return int(v.total_seconds() * 1_000_000)
 
 
@@ -716,22 +793,24 @@ class UUIDField(Field):
     Extra kwargs: ``auto_create`` — generate uuid4 by default.
     """
 
+    SUPPORTED_LOOKUPS = ["exact", "in", "isnull"]
+    SUPPORTED_TRANSFORMS = []
+
     def __init__(self, *, auto_create: bool = False, **kw):
         self.auto_create = auto_create
         if auto_create:
             kw.setdefault("default", uuid.uuid4)
         super().__init__(**kw)
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "UUID"
-    
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
-        
         return v if isinstance(v, uuid.UUID) else uuid.UUID(str(v))
-    
-    def to_db(self, v): 
+
+    def to_db(self, v):
         return None if v is None else str(v)
 
 
@@ -741,19 +820,36 @@ class UUIDField(Field):
 class JSONField(Field):
     """JSON field. Stored as JSONB (Postgres) or TEXT (others)."""
 
-    def db_type(self) -> str: 
+    SUPPORTED_LOOKUPS = [
+        "exact",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "in",
+        "range",
+        "isnull",
+        "has_key",
+        "has_any",
+        "has_all",
+        "contains",
+        "contained_by",
+    ]
+    SUPPORTED_TRANSFORMS = ["key", "key_text", "json"]
+
+    def db_type(self) -> str:
         return "JSONB"
-    
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
         return json.loads(v) if isinstance(v, str) else v
-    
+
     def to_db(self, v):
         return None if v is None else json.dumps(v)
-    
-    def _build_implicit_validators(self): 
-        pass  # JSON can be any shape
+
+    def _build_implicit_validators(self):
+        pass
 
 
 ####
@@ -770,20 +866,20 @@ class ArrayField(Field):
         self.base_field = base_field
         super().__init__(**kw)
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return f"{self.base_field.db_type()}[]"
-    
+
     def to_python(self, v):
-        if v is None: 
+        if v is None:
             return None
-        if isinstance(v, list): 
+        if isinstance(v, list):
             return v
         return json.loads(v)
-    
+
     def to_db(self, v):
         return None if v is None else json.dumps(v)
-    
-    def _build_implicit_validators(self): 
+
+    def _build_implicit_validators(self):
         pass
 
 
@@ -798,17 +894,17 @@ class ForeignKey(Field):
         on_delete:       "CASCADE", "SET_NULL", "PROTECT", "RESTRICT", "SET_DEFAULT".
         related_name:    Name for the reverse relation on the related model.
         db_constraint:   If False, skip the DB FOREIGN KEY constraint (useful for
-                         cross-database or legacy schemas).
+                          cross-database or legacy schemas).
     """
 
     def __init__(
-        self, 
-        to: Any, 
-        *, 
+        self,
+        to: Any,
+        *,
         on_delete: str = "CASCADE",
         related_name: Optional[str] = None,
-        db_constraint: bool = True, 
-        **kw
+        db_constraint: bool = True,
+        **kw,
     ):
         self.to = to
         self.on_delete = on_delete
@@ -817,32 +913,23 @@ class ForeignKey(Field):
         super().__init__(**kw)
 
     def contribute_to_class(self, model, name):
-        # The DB column is "{name}_id" (e.g. "author_id").
         self.attname = f"{name}_id"
         self.column = self._db_column or f"{name}_id"
         self.model = model
 
-        # Install a ForwardDescriptor under the relation name (without _id)
-        # so that ``post.author`` returns the related Author instance.
-        # The _id column is already handled by the Field descriptor protocol.
         from ryx.descriptors import ForwardDescriptor
+
         fwd = ForwardDescriptor(self.attname, self.to)
         fwd.__set_name__(model, name)
-        # Use type.__setattr__ to set on a class with a custom metaclass
         type.__setattr__(model, name, fwd)
 
-        # Install a ReverseFKDescriptor on the target model if related_name is given.
-        # If related_name is not set, use the lowercase source model name + "_set"
-        # (Django convention: author.post_set).
         rel_name = self.related_name or f"{model.__name__.lower()}_set"
-        # We do deferred installation because the target model class may not exist
-        # yet (forward references). Store pending registration to be resolved later.
         _pending_reverse_fk.append((self.to, rel_name, model, self.attname))
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "INTEGER"
-    
-    def to_python(self, v): 
+
+    def to_python(self, v):
         return None if v is None else int(v)
 
 
@@ -868,17 +955,16 @@ class ManyToManyField(Field):
     """
 
     def __init__(
-        self, 
-        to: Any, 
-        *, 
+        self,
+        to: Any,
+        *,
         through: Optional[str] = None,
-        related_name: Optional[str] = None, 
-        **kw
+        related_name: Optional[str] = None,
+        **kw,
     ):
         self.to = to
         self.through = through
         self.related_name = related_name
-        # M2M fields don't add a column — skip parent __init__ validators
         self.attname = ""
         self.column = ""
         self.model = None
@@ -889,58 +975,45 @@ class ManyToManyField(Field):
         self.unique = False
         self.db_index = False
         self.choices = None
-        self.editable = False   # M2M fields are not directly editable
+        self.editable = False
         self.help_text = ""
         self.verbose_name = ""
         self._db_column = None
-
-        # Must define default so get_default() / has_default() work even
-        # though we skip Field.__init__ — use the sentinel from Field
         self.default = _MISSING
-
-        # M2M join table metadata — set by contribute_to_class
         self._join_table = ""
         self._source_fk = ""
         self._target_fk = ""
 
-    def db_type(self) -> str: 
-        return ""   # No column
-    
+    def db_type(self) -> str:
+        return ""
+
     def contribute_to_class(self, model, name):
         self.attname = name
         self.model = model
 
-        # Register on the model's _meta as a M2M relation (not a column)
         if hasattr(model, "_meta"):
             model._meta.many_to_many[name] = self
 
-        # Determine join table name: "{model_a}_{model_b}" or user-specified
         join_table = self.through or f"{model.__name__.lower()}_{name}"
-
-        # Source FK column: "{source_model}_id" (e.g. "post_id")
         source_fk = f"{model.__name__.lower()}_id"
+        target_fk = (
+            f"{name.removesuffix('s')}_id" if name.endswith("s") else f"{name}_id"
+        )
 
-        # Target FK column: "{field_name}_id" → derive from field name
-        # e.g. for Post.tags the target FK in the join table is "tag_id"
-        target_fk = f"{name.removesuffix('s')}_id" if name.endswith('s') else f"{name}_id"
-
-        # Install ManyToManyDescriptor on source model
         from ryx.descriptors import ManyToManyDescriptor
+
         desc = ManyToManyDescriptor(
-            target_model_ref = self.to,
-            join_table = join_table,
-            source_fk = source_fk,
-            target_fk = target_fk,
+            target_model_ref=self.to,
+            join_table=join_table,
+            source_fk=source_fk,
+            target_fk=target_fk,
         )
         desc.__set_name__(model, name)
-
-        # Use type.__setattr__ to bypass the metaclass __setattr__ restriction
         type.__setattr__(model, name, desc)
 
-        # Store join table metadata on the field for migration DDL generation
         self._join_table = join_table
         self._source_fk = source_fk
         self._target_fk = target_fk
 
-    def _build_implicit_validators(self): 
+    def _build_implicit_validators(self):
         pass
