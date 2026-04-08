@@ -75,10 +75,20 @@ async with ryx.transaction():
 | **Backends** | All | All | **PG · MySQL · SQLite** |
 | **Migrations** | Built-in | Alembic | **Built-in** |
 
+## Architecture
+ 
+<p align="center">
+   <img src="ryx_architecture.svg" alt="Ryx Architecture" width="100%" />
+</p>
+ 
+Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded back — all without blocking the Python event loop.
+
+Since v0.1.3, the query engine has been extracted into a standalone crate `ryx-query`. This decouples the SQL compilation logic from the PyO3 bindings, enabling extreme performance and independent testing.
+ 
 ## Performance
-
+ 
 Benchmark of 1 000 rows on SQLite (lower is better):
-
+ 
 | Operation | Ryx ORM | SQLAlchemy ORM | SQLAlchemy Core | Ryx raw |
 |-----------|--------:|---------------:|----------------:|--------:|
 | **bulk_create** | 0.0074 s | 0.1696 s | 0.0022 s | 0.0011 s |
@@ -86,59 +96,13 @@ Benchmark of 1 000 rows on SQLite (lower is better):
 | **bulk_delete** | 0.0005 s | 0.0012 s | 0.0009 s | 0.0004 s |
 | **filter + order + limit** | 0.0009 s | 0.0019 s | 0.0008 s | 0.0004 s |
 | **aggregate** | 0.0002 s | 0.0015 s | 0.0005 s | 0.0001 s |
-
+ 
 Ryx ORM is **16× faster** than SQLAlchemy ORM on bulk inserts and **2× faster** on deletes — while keeping the same Django-style API. The raw SQL layer (`raw_execute` / `raw_fetch`) gives you near-C speed when you need it.
 
+**Internal Compilation Speed**: Our query compiler is blindingly fast, with simple lookups compiled in **~248ns** and complex query trees in **~1µs**.
+ 
 Run the benchmark yourself:
 
-```bash
-uv add sqlalchemy[asyncio] aiosqlite
-uv run python examples/13_benchmark_sqlalchemy.py
-```
-
-## Quick Start
-
-```bash
-pip install maturin
-maturin develop          # compile Rust + install
-```
-
-```python
-import asyncio, ryx
-from ryx import Model, CharField
-
-class Article(Model):
-    title = CharField(max_length=200)
-
-async def main():
-    await ryx.setup("sqlite:///app.db")
-    await ryx.migrate([Article])
-    await Article.objects.create(title="Hello Ryx")
-    print(await Article.objects.all())
-
-asyncio.run(main())
-```
-
-## Key Features
-
-- **30+ field types** — from `AutoField` to `JSONField`, with validation built in
-- **Q objects** — complex `AND` / `OR` / `NOT` expressions with nesting
-- **Aggregations** — `Count`, `Sum`, `Avg`, `Min`, `Max` with `GROUP BY` and `HAVING`
-- **Relationships** — `ForeignKey`, `OneToOneField`, `ManyToManyField` with `select_related` / `prefetch_related`
-- **Transactions** — async context managers with nested savepoints
-- **Signals** — `pre_save`, `post_save`, `pre_delete`, `post_delete` and more
-- **Migrations** — autodetect schema changes, generate and apply
-- **Validation** — field-level + model-level, collects all errors before raising
-- **Sync/async bridge** — use from sync or async code seamlessly
-- **CLI** — `python -m ryx migrate`, `makemigrations`, `shell`, `inspectdb`
-
-## Architecture
-
-<p align="center">
-  <img src="ryx_architecture.svg" alt="Ryx Architecture" width="100%" />
-</p>
-
-Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded back — all without blocking the Python event loop.
 
 ## Documentation
 

@@ -20,22 +20,31 @@ maturin develop            # compile Rust + install in dev mode
 ```
 
 ### Run Tests
-
+ 
 ```bash
 # Rust unit tests (no DB needed)
 cargo test
-
+ 
 # Python unit tests (no DB needed)
 python test.py
-
+ 
 # Integration tests (SQLite)
 python test.py --integration
-
+ 
 # All tests
 python test.py --all
 ```
-
+ 
+### Run Benchmarks
+ 
+To measure the performance of the query compiler:
+ 
+```bash
+cd ryx-query && cargo bench
+```
+ 
 ### Type Check
+
 
 ```bash
 mypy ryx/
