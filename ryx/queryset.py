@@ -275,6 +275,31 @@ class QuerySet:
             _group_by=overrides.get("_group_by", list(self._group_by)),
         )
 
+    def _validate_filters(self, kwargs: Dict[str, Any]) -> None:
+        """Verify that lookups and transforms are supported by the field types."""
+        for key, val in kwargs.items():
+            # Handle pk lookup by resolving to the actual PK field name
+            lookup_key = key
+            if key == "pk":
+                lookup_key = self._model._meta.pk_field.attname
+
+            field_name, lookup = _parse_lookup_key(lookup_key)
+            field = self._model._meta.fields.get(field_name)
+            if not field:
+                continue
+
+            # 1. Validate transforms (if chained: transform__transform__lookup)
+            if "__" in lookup:
+                parts = lookup.split("__")
+                transforms = parts[:-1]
+                final_lookup = parts[-1]
+                for t in transforms:
+                    field._validate_transform(t)
+                field._validate_lookup(final_lookup)
+            else:
+                # 2. Simple lookup
+                field._validate_lookup(lookup)
+
     ##  Filtering
     def filter(self, *q_args: Q, **kwargs: Any) -> "QuerySet":
         """Add WHERE conditions (AND-ed). Accepts Q objects and kwargs.
@@ -284,7 +309,7 @@ class QuerySet:
             Post.objects.filter(Q(active=True) | Q(featured=True))
             Post.objects.filter(Q(active=True), views__gte=100)
         """
-
+        self._validate_filters(kwargs)
         builder = self._builder
 
         # Q objects
@@ -303,7 +328,7 @@ class QuerySet:
 
     def exclude(self, *q_args: Q, **kwargs: Any) -> "QuerySet":
         """Add NOT conditions."""
-
+        self._validate_filters(kwargs)
         builder = self._builder
         for q in q_args:
             builder = _apply_q_node(builder, (~q).to_q_node())
@@ -834,7 +859,6 @@ def _get_known_lookups() -> frozenset:
                 "json",
                 # JSON lookups (final lookups)
                 "has_key",
-                "has_keys",
                 "contains",
                 "contained_by",
             }

@@ -139,6 +139,16 @@ def available_lookups() -> list[str]:
     return _core.available_lookups()
 
 
+def list_lookups() -> list[str]:
+    """Return all built-in lookup names (for auto-discovery)."""
+    return list(_core.list_lookups())
+
+
+def available_transforms() -> list[str]:
+    """Return all built-in transform names (for auto-discovery)."""
+    return list(_core.list_transforms())
+
+
 def is_connected() -> bool:
     return _core.is_connected()
 
@@ -172,6 +182,8 @@ __all__ = [
     "is_connected",
     "pool_stats",
     "lookup",
+    "list_lookups",
+    "list_transforms",
     # Model
     "Model",
     "Index",
