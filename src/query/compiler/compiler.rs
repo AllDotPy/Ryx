@@ -489,6 +489,47 @@ fn compile_single_filter(
         });
     }
 
+    if lookup == "has_any" || lookup == "has_all" {
+        let items = match value {
+            SqlValue::List(v) => v.clone(),
+            other => vec![other.clone()],
+        };
+        if items.is_empty() {
+            return Ok("(1 = 0)".into());
+        }
+
+        let fragment = if backend == Backend::PostgreSQL {
+            let op = if lookup == "has_any" { "?|" } else { "?&" };
+            format!("{final_column} {op} ?")
+        } else if backend == Backend::MySQL {
+            let op = if lookup == "has_any" {
+                "'one'"
+            } else {
+                "'all'"
+            };
+            let ph = std::iter::repeat_n("CONCAT('$.', ?)", items.len())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("JSON_CONTAINS_PATH({}, {op}, {ph})", final_column)
+        } else {
+            // SQLite: manual expansion
+            let op = if lookup == "has_any" { " OR " } else { " AND " };
+            let ph = std::iter::repeat_n(
+                format!("json_extract({}, '$.' || ?) IS NOT NULL", final_column),
+                items.len(),
+            )
+            .collect::<Vec<_>>()
+            .join(op);
+            ph
+        };
+        values.extend(items);
+        return Ok(if negated {
+            format!("NOT ({fragment})")
+        } else {
+            fragment
+        });
+    }
+
     if lookup == "range" {
         let (lo, hi) = match value {
             SqlValue::List(v) if v.len() == 2 => (v[0].clone(), v[1].clone()),
