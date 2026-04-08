@@ -129,6 +129,16 @@ def available_lookups() -> list[str]:
     ...
 
 
+def list_lookups() -> list[str]:
+    """Return all registered lookup names (built-in + custom)."""
+    ...
+
+
+def list_transforms() -> list[str]:
+    """Return all registered transform names (built-in + custom)."""
+    ...
+
+
 def is_connected() -> bool:
     """Return ``True`` if ``setup()`` has been called successfully.
 

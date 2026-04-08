@@ -32,3 +32,5 @@ pub use lookups::init_registry;
 pub use lookups::register_custom;
 pub use lookups::registered_lookups;
 pub use lookups::resolve;
+pub use lookups::all_lookups;
+pub use lookups::all_transforms;
