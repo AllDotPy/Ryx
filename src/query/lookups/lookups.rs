@@ -91,9 +91,12 @@ pub fn init_registry() {
         builtin.insert("json", json_lookups::json_cast_transform as LookupFn);
 
         builtin.insert("has_key", json_lookups::json_has_key as LookupFn);
-        builtin.insert("has_keys", json_lookups::json_has_keys as LookupFn);
+        builtin.insert("has_any", json_lookups::json_has_any as LookupFn);
+        builtin.insert("has_all", json_lookups::json_has_all as LookupFn);
         builtin.insert("contains", json_lookups::json_contains as LookupFn);
         builtin.insert("contained_by", json_lookups::json_contained_by as LookupFn);
+        builtin.insert("has_all", json_lookups::json_has_all as LookupFn);
+        builtin.insert("has_any", json_lookups::json_has_any as LookupFn);
 
         RwLock::new(LookupRegistry {
             builtin,
@@ -148,6 +151,8 @@ fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> RyxRes
     })
 }
 
+/// Returns the list of all registered lookup names (built-in + custom).
+/// Used by the Python layer for available_lookups().
 pub fn registered_lookups() -> RyxResult<Vec<String>> {
     let registry = REGISTRY
         .get()
@@ -166,6 +171,65 @@ pub fn registered_lookups() -> RyxResult<Vec<String>> {
         .collect();
     names.sort();
     Ok(names)
+}
+
+/// Returns a static slice of all built-in lookup names.
+/// This is used for auto-discovery on the Python side.
+pub fn all_lookups() -> &'static [&'static str] {
+    &[
+        // Comparison
+        "exact",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        // String
+        "contains",
+        "icontains",
+        "startswith",
+        "istartswith",
+        "endswith",
+        "iendswith",
+        // Null
+        "isnull",
+        // Membership
+        "in",
+        // Range
+        "range",
+        // Date/Time transforms
+        "date",
+        "year",
+        "month",
+        "day",
+        "hour",
+        "minute",
+        "second",
+        "week",
+        "dow",
+        "quarter",
+        "time",
+        "iso_week",
+        "iso_dow",
+        // JSON transforms
+        "key",
+        "key_text",
+        "json",
+        // JSON lookups
+        "has_key",
+        "has_any",
+        "has_all",
+        "contains",
+        "contained_by",
+    ]
+}
+
+/// Returns a static slice of all transform names (date/time + JSON).
+/// Used for validation when chaining field transforms.
+pub fn all_transforms() -> &'static [&'static str] {
+    &[
+        "date", "year", "month", "day", "hour", "minute", "second", "week", "dow", "quarter",
+        "time", "iso_week", "iso_dow", "key", "key_text", "json",
+    ]
 }
 
 // ###
