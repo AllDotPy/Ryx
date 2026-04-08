@@ -89,24 +89,36 @@ pub fn json_cast_transform(ctx: &LookupContext) -> String {
     }
 }
 
-/// `field__has_key="key"` → `field ? 'key'` (PostgreSQL) or `JSON_CONTAINS(field, '"key"')` (MySQL)
+/// `field__has_key="key"` → `field ? ?` (PostgreSQL) or `JSON_CONTAINS_PATH(field, 'one', CONCAT('$.', ?))` (MySQL)
 pub fn json_has_key(ctx: &LookupContext) -> String {
     match ctx.backend {
-        Backend::PostgreSQL => format!("({} ? 'key')", ctx.column),
-        Backend::MySQL => format!("JSON_CONTAINS({}, '\"key\"')", ctx.column),
-        Backend::SQLite => format!("json_extract({}, '$.key') IS NOT NULL", ctx.column),
+        Backend::PostgreSQL => format!("({} ? ?)", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS_PATH({}, 'one', CONCAT('$.', ?))", ctx.column),
+        Backend::SQLite => format!("json_extract({}, '$.' || ?) IS NOT NULL", ctx.column),
     }
 }
 
-/// `field__has_keys=['key1', 'key2']` → `field ?& array['key1', 'key2']`
-pub fn json_has_keys(ctx: &LookupContext) -> String {
+/// `field__has_any=['key1', 'key2']` → `field ?| ?` (PostgreSQL) or `JSON_CONTAINS_PATH(field, 'one', ?, ?)` (MySQL)
+pub fn json_has_any(ctx: &LookupContext) -> String {
     match ctx.backend {
-        Backend::PostgreSQL => format!("({} ?& array['key1', 'key2'])", ctx.column),
-        Backend::MySQL => format!("JSON_CONTAINS({}, '[\"key1\", \"key2\"]')", ctx.column),
+        Backend::PostgreSQL => format!("({} ?| ?)", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS_PATH({}, 'one', (?))", ctx.column),
         Backend::SQLite => format!(
-            "json_extract({}, '$.key1') IS NOT NULL AND json_extract({}, '$.key2') IS NOT NULL",
-            ctx.column, ctx.column
-        ),
+            "json_extract({}, '$.' || ?) IS NOT NULL (?)",
+            ctx.column
+        ), // Template
+    }
+}
+
+/// `field__has_all=['key1', 'key2']` → `field ?& ?` (PostgreSQL) or `JSON_CONTAINS_PATH(field, 'all', ?, ?)` (MySQL)
+pub fn json_has_all(ctx: &LookupContext) -> String {
+    match ctx.backend {
+        Backend::PostgreSQL => format!("({} ?& ?)", ctx.column),
+        Backend::MySQL => format!("JSON_CONTAINS_PATH({}, 'all', (?))", ctx.column),
+        Backend::SQLite => format!(
+            "json_extract({}, '$.' || ?) IS NOT NULL (?)",
+            ctx.column
+        ), // Template
     }
 }
 
