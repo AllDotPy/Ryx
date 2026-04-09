@@ -24,35 +24,31 @@
 //   multiple threads race to call `setup()`. Subsequent reads are lock-free.
 // ###
 
-use std::sync::OnceLock;
-
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock, RwLock};
+ 
 use serde::{Deserialize, Serialize};
 use sqlx::{
     AnyPool,
     any::{AnyPoolOptions, install_default_drivers},
 };
 use tracing::{debug, info};
-
+ 
 use crate::errors::{RyxError, RyxResult};
 use ryx_query::Backend;
 
-// ###
-// Global singleton
-//
-// We use `std::sync::OnceLock` (stable since Rust 1.70) rather than
-// `once_cell::sync::OnceCell` to avoid an extra dependency for this specific
-// use case. OnceLock is conceptually identical.
-// ###
+/// A registry of database connection pools.
+/// Allows multiple databases to be configured and accessed via aliases.
+pub struct PoolRegistry {
+    /// Map of alias (e.g., "default", "replica") to the connection pool and its backend.
+    pub pools: HashMap<String, (Arc<AnyPool>, Backend)>,
+    /// The alias used when no specific database is requested.
+    pub default_alias: String,
+}
 
-/// The single global connection pool for this process.
-///
-/// Initialized exactly once by `initialize()`. All ORM operations retrieve
-/// the pool via `get()`.
-static POOL: OnceLock<AnyPool> = OnceLock::new();
+/// Global singleton for the pool registry.
+static REGISTRY: OnceLock<RwLock<PoolRegistry>> = OnceLock::new();
 
-/// The backend type for the initialized pool.
-/// Set at initialization time based on the database URL.
-static BACKEND: OnceLock<Backend> = OnceLock::new();
 
 // ###
 // Pool configuration options
@@ -105,96 +101,120 @@ impl Default for PoolConfig {
 //
 // Public API
 //
-
-/// Initialize the global connection pool.
+/// Initialize the global connection pool registry.
 ///
 /// # Arguments
-/// * `database_url` — a standard database URL, e.g.:
-///   - `"postgres://user:pass@localhost/dbname"`
-///   - `"mysql://user:pass@localhost/dbname"`
-///   - `"sqlite:///path/to/db.sqlite3"` or `"sqlite::memory:"`
-/// * `config` — optional pool tuning parameters (see [`PoolConfig`])
+/// * `database_urls` — a map of aliases to database URLs.
+///   Example: `{"default": "postgres://...", "logs": "sqlite://..."}`
+/// * `config` — pool tuning parameters (see [`PoolConfig`])
 ///
 /// # Errors
 /// - [`RyxError::PoolAlreadyInitialized`] if called more than once
-/// - [`RyxError::Database`] if the URL is invalid or the DB is unreachable
-///
-/// # Design note
-/// We call `install_default_drivers()` here. This registers the Postgres,
-/// MySQL, and SQLite drivers with sqlx's `AnyPool` machinery. Without this
-/// call, `AnyPool::connect()` panics with "no driver for scheme". The call
-/// is idempotent so it's safe to call multiple times (though we only ever
-/// call it once via OnceLock).
-pub async fn initialize(database_url: &str, config: PoolConfig) -> RyxResult<()> {
+/// - [`RyxError::Database`] if any URL is invalid or DB is unreachable
+pub async fn initialize(database_urls: HashMap<String, String>, config: PoolConfig) -> RyxResult<()> {
     // Register all built-in sqlx drivers with AnyPool.
-    // This must be called before any AnyPool operation.
     install_default_drivers();
+ 
+    if database_urls.is_empty() {
+        return Err(RyxError::Internal("No database URLs provided for initialization".into()));
+    }
 
-    debug!(url = %database_url, "Initializing Ryx connection pool");
-
-    let pool = AnyPoolOptions::new()
-        .max_connections(config.max_connections)
-        .min_connections(config.min_connections)
-        .acquire_timeout(std::time::Duration::from_secs(config.connect_timeout_secs))
-        .idle_timeout(std::time::Duration::from_secs(config.idle_timeout_secs))
-        .max_lifetime(std::time::Duration::from_secs(config.max_lifetime_secs))
-        .connect(database_url)
-        .await
-        .map_err(RyxError::Database)?;
-
-    // OnceLock::set returns Err(value) if already set.
-    // We return our own error type to give a clearer message to users.
-    POOL.set(pool)
+    debug!(urls = ?database_urls, "Initializing Ryx connection pool registry");
+ 
+    let mut pools = HashMap::new();
+    let mut first_alias = None;
+ 
+    for (alias, url) in database_urls {
+        if first_alias.is_none() {
+            first_alias = Some(alias.clone());
+        }
+ 
+        let pool = AnyPoolOptions::new()
+            .max_connections(config.max_connections)
+            .min_connections(config.min_connections)
+            .acquire_timeout(std::time::Duration::from_secs(config.connect_timeout_secs))
+            .idle_timeout(std::time::Duration::from_secs(config.idle_timeout_secs))
+            .max_lifetime(std::time::Duration::from_secs(config.max_lifetime_secs))
+            .connect(&url)
+            .await
+            .map_err(RyxError::Database)?;
+ 
+        let backend = ryx_query::backend::detect_backend(&url);
+        pools.insert(alias, (Arc::new(pool), backend));
+    }
+ 
+    // Determine the default alias
+    let default_alias = if pools.contains_key("default") {
+        "default".to_string()
+    } else {
+        first_alias.expect("Registry cannot be empty")
+    };
+ 
+    let registry = PoolRegistry {
+        pools,
+        default_alias,
+    };
+ 
+    REGISTRY.set(RwLock::new(registry))
         .map_err(|_| RyxError::PoolAlreadyInitialized)?;
-
-    // Set the backend type based on the URL
-    let backend = ryx_query::backend::detect_backend(database_url);
-    BACKEND.set(backend).ok();
-
-    info!("Ryx connection pool initialized successfully");
+ 
+    info!("Ryx connection pool registry initialized successfully");
     Ok(())
 }
-
-/// Retrieve a reference to the global connection pool.
+ 
+/// Retrieve a reference to a specific connection pool.
+///
+/// # Arguments
+/// * `alias` — the pool alias to retrieve. If `None`, the default pool is used.
 ///
 /// # Errors
-/// Returns [`RyxError::PoolNotInitialized`] if `initialize()` has not been
-/// called. Every ORM operation calls this first, so users get a clear error
-/// message rather than a panic.
-pub fn get() -> RyxResult<&'static AnyPool> {
-    POOL.get().ok_or(RyxError::PoolNotInitialized)
+/// Returns [`RyxError::PoolNotInitialized`] if `initialize()` has not been called,
+/// or if the specified alias does not exist.
+pub fn get(alias: Option<&str>) -> RyxResult<Arc<AnyPool>> {
+    let registry_lock = REGISTRY.get().ok_or(RyxError::PoolNotInitialized)?;
+    let registry = registry_lock.read().unwrap();
+ 
+    let target_alias = alias.unwrap_or(&registry.default_alias);
+    
+    registry.pools.get(target_alias)
+        .map(|(pool, _)| pool.clone())
+        .ok_or_else(|| RyxError::Internal(format!("Database pool '{}' not found", target_alias)))
 }
-
-/// Check whether the pool has been initialized without consuming it.
-/// Useful for diagnostic / health-check endpoints.
+ 
+/// Check whether the pool registry has been initialized.
 pub fn is_initialized() -> bool {
-    POOL.get().is_some()
+    REGISTRY.get().is_some()
 }
-
-/// Retrieve the current backend type.
+ 
+/// Retrieve the backend type for a specific pool.
 ///
 /// # Errors
-/// Returns [`RyxError::PoolNotInitialized`] if `initialize()` has not been called.
-pub fn get_backend() -> RyxResult<Backend> {
-    BACKEND.get().copied().ok_or(RyxError::PoolNotInitialized)
+/// Returns [`RyxError::PoolNotInitialized`] if the registry is not set up,
+/// or if the specified alias does not exist.
+pub fn get_backend(alias: Option<&str>) -> RyxResult<Backend> {
+    let registry_lock = REGISTRY.get().ok_or(RyxError::PoolNotInitialized)?;
+    let registry = registry_lock.read().unwrap();
+ 
+    let target_alias = alias.unwrap_or(&registry.default_alias);
+    
+    registry.pools.get(target_alias)
+        .map(|(_, backend)| *backend)
+        .ok_or_else(|| RyxError::Internal(format!("Database pool '{}' not found", target_alias)))
 }
-
-/// Return pool statistics as a simple struct.
-/// Exposed to Python for monitoring and debugging.
+ 
+/// Return pool statistics for a specific pool.
 #[derive(Debug)]
 pub struct PoolStats {
     pub size: u32,
     pub idle: u32,
 }
-
-/// Retrieve current pool statistics.
-///
-/// # Errors
-/// Returns [`RyxError::PoolNotInitialized`] if the pool is not yet set up.
-pub fn stats() -> RyxResult<PoolStats> {
-    let pool = get()?;
+ 
+/// Retrieve current pool statistics for a specific pool.
+pub fn stats(alias: Option<&str>) -> RyxResult<PoolStats> {
+    let pool = get(alias)?;
     Ok(PoolStats {
         size: pool.size(),
         idle: pool.num_idle() as u32,
     })
 }
+

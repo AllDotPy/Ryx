@@ -28,7 +28,7 @@ use crate::transaction::TransactionHandle;
 
 #[pyfunction]
 #[pyo3(signature = (
-    url,
+    urls,
     max_connections = 10,
     min_connections = 1,
     connect_timeout = 30,
@@ -37,13 +37,22 @@ use crate::transaction::TransactionHandle;
 ))]
 fn setup<'py>(
     py: Python<'py>,
-    url: String,
+    urls: Bound<'_, PyAny>,
     max_connections: u32,
     min_connections: u32,
     connect_timeout: u64,
     idle_timeout: u64,
     max_lifetime: u64,
 ) -> PyResult<Bound<'py, PyAny>> {
+    let urls_py = urls.downcast::<PyDict>()?;
+    let mut database_urls = HashMap::new();
+ 
+    for (key, value) in urls_py.iter() {
+        let alias = key.downcast::<PyString>()?.to_str()?.to_string();
+        let url = value.downcast::<PyString>()?.to_str()?.to_string();
+        database_urls.insert(alias, url);
+    }
+ 
     let config = PoolConfig {
         max_connections,
         min_connections,
@@ -52,7 +61,7 @@ fn setup<'py>(
         max_lifetime_secs: max_lifetime,
     };
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        pool::initialize(&url, config).await.map_err(PyErr::from)?;
+        pool::initialize(database_urls, config).await.map_err(PyErr::from)?;
         Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
     })
 }
@@ -79,17 +88,18 @@ fn list_transforms() -> Vec<&'static str> {
 
 
 #[pyfunction]
-fn is_connected(py: Python<'_>) -> bool {
+fn is_connected(_py: Python<'_>, alias: Option<String>) -> bool {
+    // For now we just check if the registry is initialized
     pool::is_initialized()
 }
 
 #[pyfunction]
-fn pool_stats(py: Python<'_>) -> PyResult<Py<PyAny>> {
-    let stats = pool::stats().map_err(PyErr::from)?;
+fn pool_stats<'py>(py: Python<'py>, alias: Option<String>) -> PyResult<Bound<'py, PyAny>> {
+    let stats = pool::stats(alias.as_deref()).map_err(PyErr::from)?;
     let dict = PyDict::new(py);
     dict.set_item("size", stats.size)?;
     dict.set_item("idle", stats.idle)?;
-    Ok(dict.into())
+    Ok(dict.into_any())
 }
 
 #[pyfunction]
@@ -134,7 +144,7 @@ impl PyQueryBuilder {
     #[new]
     fn new(table: String) -> PyResult<Self> {
         // Get the backend from the pool at QueryBuilder creation time
-        let backend = pool::get_backend().unwrap_or(ryx_query::Backend::PostgreSQL);
+        let backend = pool::get_backend(None).unwrap_or(ryx_query::Backend::PostgreSQL);
         
         Ok(Self {
             node: QueryNode::select(table).with_backend(backend),

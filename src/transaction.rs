@@ -71,7 +71,7 @@ pub struct TransactionHandle {
 impl TransactionHandle {
     /// Begin a new transaction by acquiring a connection from the pool.
     pub async fn begin() -> RyxResult<Self> {
-        let pool = pool::get()?;
+        let pool = pool::get(None)?;
         debug!("Beginning transaction");
         let tx = pool.begin().await.map_err(RyxError::Database)?;
 

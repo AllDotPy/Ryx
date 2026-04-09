@@ -87,25 +87,22 @@ pub async fn fetch_all(query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
         }
         return Err(RyxError::Internal("Transaction is no longer active".into()));
     }
-
-    let pool = pool::get()?;
-
+ 
+    let pool = pool::get(None)?;
+ 
     debug!(sql = %query.sql, "Executing SELECT");
-
-    // Build the sqlx query and bind all values.
-    // We use `sqlx::query()` (the dynamic version) because our SQL is
-    // constructed at runtime — we can't use the compile-time `query!` macro.
+ 
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
-
-    // Fetch all rows and decode each one into a DecodedRow.
-    let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
-
+ 
+    let rows = q.fetch_all(&*pool).await.map_err(RyxError::Database)?;
+ 
     let decoded = rows.iter().map(decode_row).collect();
     Ok(decoded)
 }
-
+ 
 /// Execute a SELECT COUNT(*) query and return the count.
+
 ///
 /// # Errors
 /// Same as [`fetch_all`].
@@ -118,7 +115,6 @@ pub async fn fetch_count(query: CompiledQuery) -> RyxResult<i64> {
             if rows.is_empty() {
                 return Ok(0);
             }
-            // COUNT() returns a single column whose name may vary by backend.
             if let Some(value) = rows[0].values().next() {
                 if let Some(i) = value.as_i64() {
                     return Ok(i);
@@ -133,25 +129,24 @@ pub async fn fetch_count(query: CompiledQuery) -> RyxResult<i64> {
         }
         return Err(RyxError::Internal("Transaction is no longer active".into()));
     }
-
-    let pool = pool::get()?;
-
+ 
+    let pool = pool::get(None)?;
+ 
     debug!(sql = %query.sql, "Executing COUNT");
-
+ 
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
-
-    let row = q.fetch_one(pool).await.map_err(RyxError::Database)?;
-
-    // COUNT(*) always returns a single column. We try to get it as i64
-    // first (Postgres/SQLite), then fall back to i32 (some MySQL versions).
+ 
+    let row = q.fetch_one(&*pool).await.map_err(RyxError::Database)?;
+ 
     let count: i64 = row.try_get(0).unwrap_or_else(|_| {
         let n: i32 = row.try_get(0).unwrap_or(0);
         n as i64
     });
-
+ 
     Ok(count)
 }
+
 
 /// Execute a SELECT and return at most one row.
 ///
@@ -178,16 +173,16 @@ pub async fn fetch_one(query: CompiledQuery) -> RyxResult<DecodedRow> {
             Err(RyxError::Internal("Transaction is no longer active".into()))
         }
     } else {
-        let pool = pool::get()?;
-
+        let pool = pool::get(None)?;
+ 
         let mut q = sqlx::query(&query.sql);
         q = bind_values(q, &query.values);
-
+ 
         // Limit to 2 at the executor level (the QueryNode may already have
         // LIMIT 1 set by `.first()`, but for `.get()` it doesn't).
         // We check the count in Rust rather than adding SQL complexity.
-        let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
-
+        let rows = q.fetch_all(&*pool).await.map_err(RyxError::Database)?;
+ 
         match rows.len() {
             0 => Err(RyxError::DoesNotExist),
             1 => Ok(decode_row(&rows[0])),
@@ -195,6 +190,7 @@ pub async fn fetch_one(query: CompiledQuery) -> RyxResult<DecodedRow> {
         }
     }
 }
+
 
 /// Execute an INSERT, UPDATE, or DELETE query.
 ///
@@ -228,36 +224,37 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
         }
         return Err(RyxError::Internal("Transaction is no longer active".into()));
     }
-
-    let pool = pool::get()?;
-
+ 
+    let pool = pool::get(None)?;
+ 
     debug!(sql = %query.sql, "Executing mutation");
-
+ 
     // Check if this is a RETURNING query (e.g. INSERT ... RETURNING id)
     if query.sql.to_uppercase().contains("RETURNING") {
         let mut q = sqlx::query(&query.sql);
         q = bind_values(q, &query.values);
-
-        let rows = q.fetch_all(pool).await.map_err(RyxError::Database)?;
-
+ 
+        let rows = q.fetch_all(&*pool).await.map_err(RyxError::Database)?;
+ 
         let last_insert_id = rows.first().and_then(|row| row.try_get::<i64, _>(0).ok());
-
+ 
         return Ok(MutationResult {
             rows_affected: rows.len() as u64,
             last_insert_id,
         });
     }
-
+ 
     let mut q = sqlx::query(&query.sql);
     q = bind_values(q, &query.values);
-
-    let result = q.execute(pool).await.map_err(RyxError::Database)?;
-
+ 
+    let result = q.execute(&*pool).await.map_err(RyxError::Database)?;
+ 
     Ok(MutationResult {
         rows_affected: result.rows_affected(),
         last_insert_id: None,
     })
 }
+
 
 // ###
 // Internal helpers
