@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.svg" alt="Ryx ORM" width="80" height="80" />
+  <img src="https://github.com/AllDotPy/Ryx/blob/master/logo.svg?raw=true" alt="Ryx ORM" width="80" height="80" />
 </p>
 
 <h1 align="center">Ryx ORM</h1>
@@ -78,7 +78,7 @@ async with ryx.transaction():
 ## Architecture
  
 <p align="center">
-   <img src="ryx_architecture.svg" alt="Ryx Architecture" width="100%" />
+   <img src="https://github.com/AllDotPy/Ryx/blob/master/ryx_architecture.svg?raw=true" alt="Ryx Architecture" width="100%" />
 </p>
  
 Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded back — all without blocking the Python event loop.
