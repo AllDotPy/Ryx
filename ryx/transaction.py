@@ -73,7 +73,8 @@ class TransactionContext:
     value so callers can use explicit ``savepoint()`` / ``rollback_to()``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, alias: Optional[str] = None) -> None:
+        self._alias = alias
         self._handle = None  # set in __aenter__
         self._savepoint_name: Optional[str] = None
         self._outer_token = None  # for ContextVar reset
@@ -84,20 +85,23 @@ class TransactionContext:
     async def __aenter__(self):
         outer = _active_tx.get()
 
+        # If there is an outer transaction, check if it's for the same database.
+        # If it's for a different database, we treat this as a new outermost
+        # transaction for that specific database.
         if outer is not None:
-            #  Nested transaction → SAVEPOINT
-            # We reuse the outer transaction's connection and create a named
-            # savepoint. The name is unique per nesting level.
-            sp_name = f"_Ryx_sp_{id(self)}"
-            self._savepoint_name = sp_name
-            await outer.savepoint(sp_name)
-            self._handle = outer
-            logger.debug("Nested transaction: created savepoint %s", sp_name)
-        else:
-            # Outermost transaction → BEGIN
-            self._handle = await _core.begin_transaction()
-            logger.debug("Transaction BEGIN")
+            outer_alias = outer.get_alias()
+            if outer_alias == self._alias:
+                # Nested transaction on same DB → SAVEPOINT
+                sp_name = f"_Ryx_sp_{id(self)}"
+                self._savepoint_name = sp_name
+                await outer.savepoint(sp_name)
+                self._handle = outer
+                logger.debug("Nested transaction: created savepoint %s", sp_name)
+                return self._handle
 
+        # Outermost transaction (or transaction on a different DB) → BEGIN
+        self._handle = await _core.begin_transaction(self._alias)
+        logger.debug("Transaction BEGIN (alias=%s)", self._alias)
         self._outer_token = _active_tx.set(self._handle)
         self._previous_tx = outer
         _core._set_active_transaction(self._handle)
@@ -136,17 +140,20 @@ class TransactionContext:
         return False
 
 
-def transaction() -> TransactionContext:
+def transaction(alias: Optional[str] = None) -> TransactionContext:
     """Return an async context manager for database transactions.
 
     Usage::
-
-        async with Ryx.transaction():
+        async with ryx.transaction():
             await Post.objects.create(title="Atomic post")
             await Tag.objects.create(name="python")
 
+        # Transaction on a specific database:
+        async with ryx.transaction(alias="user_db"):
+            await User.objects.create(name="Atomic user")
+
         # With explicit handle for savepoints:
-        async with Ryx.transaction() as tx:
+        async with ryx.transaction() as tx:
             await Order.objects.create(total=99.99)
             await tx.savepoint("before_items")
             try:
@@ -157,7 +164,6 @@ def transaction() -> TransactionContext:
                 raise
 
     Nesting::
-
         async with Ryx.transaction():           # BEGIN
             ...
             async with Ryx.transaction():       # SAVEPOINT _Ryx_sp_...
@@ -167,7 +173,7 @@ def transaction() -> TransactionContext:
     Returns:
         :class:`TransactionContext` — an async context manager.
     """
-    return TransactionContext()
+    return TransactionContext(alias)
 
 
 def get_active_transaction():
@@ -178,7 +184,7 @@ def get_active_transaction():
 
     Example::
 
-        tx = Ryx.get_active_transaction()
+        tx = ryx.get_active_transaction()
         if tx:
             # we're inside a transaction — the next ORM call auto-enlists
             pass
