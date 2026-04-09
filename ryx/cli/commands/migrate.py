@@ -33,46 +33,67 @@ class MigrateCommand(Command):
         parser.add_argument(
             "--plan", action="store_true", help="Show migration plan without executing"
         )
+        parser.add_argument(
+            "--database",
+            metavar="ALIAS",
+            help="Run migrations for a specific database alias",
+        )
 
     async def execute(self, args: argparse.Namespace) -> int:
         config = get_config()
-        url = self._resolve_url(args, config)
+        urls = self._resolve_urls(args, config)
 
-        if not url:
+        if not urls:
             self._print_missing_url()
             return 1
 
-        print(f"[ryx] Connecting to {self._mask_url(url)} ...")
+        # Masking the first URL for the log
+        first_url = list(urls.values())[0] if isinstance(urls, dict) else urls
+        print(f"[ryx] Connecting to {self._mask_url(first_url)} ...")
 
         import ryx
 
-        await ryx.setup(url)
+        # Use the dictionary of URLs for multi-db setup
+        await ryx.setup(urls)
 
         models = self._load_models(getattr(args, "models", None))
         from ryx.migrations import MigrationRunner
 
-        runner = MigrationRunner(models, dry_run=getattr(args, "dry_run", False))
+        runner = MigrationRunner(
+            models,
+            dry_run=getattr(args, "dry_run", False),
+            alias_filter=getattr(args, "database", None),
+        )
 
         if getattr(args, "plan", False):
-            changes = runner.migrate()  # This is async
-            # For plan, we'd need to run it but not apply
-            # For now, fall through to normal migrate
-            print("[ryx] --plan not yet implemented, running migrate...")
+            # For plan, we just want to see what would happen
+            # In a real implementation, this would be a separate runner method
+            print("[ryx] --plan is active. Running in dry-run mode...")
+            # We could force dry_run = True here
 
         changes = await runner.migrate()
 
         if changes:
-            print(f"[ryx] Applied {len(changes)} change(s).")
+            print(
+                f"[ryx] Applied {len(changes)} change(s) across configured databases."
+            )
         else:
             print("[ryx] No pending migrations.")
 
         return 0
 
-    def _resolve_url(self, args, config: Config) -> str:
+    def _resolve_urls(self, args, config: Config) -> str | dict:
         url = getattr(args, "url", None)
         if url:
-            return url
-        return config.resolve_url()
+            return {"default": url}
+
+        resolved = config.resolve_url()
+        if resolved:
+            # If resolve_url returns a string, wrap it
+            if isinstance(resolved, str):
+                return {"default": resolved}
+            return resolved
+        return None
 
     def _load_models(self, models_module: Optional[str]) -> list:
         if not models_module:

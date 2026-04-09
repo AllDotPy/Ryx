@@ -27,27 +27,27 @@ from __future__ import annotations
 from ryx import ryx_core as _core
 
 
-async def raw_fetch(sql: str) -> list:
+async def raw_fetch(sql: str, alias: Optional[str] = None) -> list:
     """Execute a raw SELECT SQL string and return rows as a list of dicts.
 
-    This is a low-level escape hatch. Use QuerySet for all application queries.
+    This is a low-level escape hatch. Use QuerySet for application queries.
 
     Args:
         sql: A complete SQL SELECT string. Must NOT contain user input.
+        alias: Optional database alias to use. Defaults to 'default'.
 
     Returns:
         A list of row dicts, same format as QuerySet results.
     """
-    # We use a RawQueryBuilder to send the SQL directly to the executor.
-    # This Rust function is registered in lib.rs specifically for this use case.
-    return await _core.raw_fetch(sql)
+    return await _core.raw_fetch(sql, alias=alias)
 
 
-async def raw_execute(sql: str) -> None:
+async def raw_execute(sql: str, alias: Optional[str] = None) -> None:
     """Execute a raw DDL/DML SQL string with no return value.
 
     Args:
         sql: A complete SQL string (CREATE TABLE, ALTER TABLE, etc.).
-             Must NOT contain user input.
+              Must NOT contain user input.
+        alias: Optional database alias to use. Defaults to 'default'.
     """
-    await _core.raw_execute(sql)
+    await _core.raw_execute(sql, alias=alias)

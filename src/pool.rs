@@ -196,6 +196,13 @@ pub fn is_initialized(alias: Option<String>) -> bool {
     }
 }
  
+/// Return a list of all configured database aliases.
+pub fn list_aliases() -> RyxResult<Vec<String>> {
+    let registry_lock = REGISTRY.get().ok_or(RyxError::PoolNotInitialized)?;
+    let registry = registry_lock.read().unwrap();
+    Ok(registry.pools.keys().cloned().collect())
+}
+
 /// Retrieve the backend type for a specific pool.
 ///
 /// # Errors

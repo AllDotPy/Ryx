@@ -42,8 +42,9 @@ MIGRATIONS_TABLE = "ryx_migrations"
 class MigrationRunner:
     """Apply pending schema changes to the live database.
 
-    Usage::
+    Now supports multi-database routing.
 
+    Usage::
         from ryx.migrations import MigrationRunner
         runner = MigrationRunner([Post, Author, Comment])
         await runner.migrate()
@@ -57,58 +58,108 @@ class MigrationRunner:
     """
 
     def __init__(
-        self, models: list, *, dry_run: bool = False, backend: Optional[str] = None
+        self,
+        models: list,
+        *,
+        dry_run: bool = False,
+        backend: Optional[str] = None,
+        alias_filter: Optional[str] = None,
     ) -> None:
         self._models = models
         self._dry_run = dry_run
-        # Detect backend from explicit argument, env var, or default to postgres
-        if backend:
-            self._backend = backend.lower()
-        else:
-            url = os.environ.get("RYX_DATABASE_URL", "")
-            self._backend = detect_backend(url) if url else "postgres"
-        self._ddl = DDLGenerator(self._backend)
+        self._alias_filter = alias_filter
+        # 'backend' is now a fallback if we can't detect it from the pool
+        self._fallback_backend = backend.lower() if backend else "postgres"
+        self._ddl = None  # Will be initialized per-database during migration
 
     async def migrate(self) -> List[SchemaChange]:
-        """Detect and apply all pending schema changes.
+        """Detect and apply all pending schema changes across configured databases.
 
         Returns:
-            List of SchemaChange objects applied (or that would be applied
-            in dry-run mode).
+            A list of all SchemaChange objects applied across databases.
         """
-        await self._ensure_migrations_table()
+        from ryx.router import get_router
 
-        current_state = await self._introspect_schema()
-        target_state = project_state_from_models(self._models)
-        changes = diff_states(current_state, target_state)
+        router = get_router()
 
-        if not changes:
-            logger.info("No schema changes detected — database is up to date.")
-        else:
-            logger.info("Detected %d schema change(s):", len(changes))
-            for ch in changes:
-                logger.info("  - %s", ch)
+        all_applied_changes = []
+        aliases = _core.list_aliases()
 
-        if self._dry_run:
-            self._print_dry_run(changes, target_state)
-            return changes
+        for alias in aliases:
+            # Filter by alias if requested via CLI
+            if self._alias_filter and alias != self._alias_filter:
+                continue
 
-        await self._apply_changes(changes, target_state)
-        await self._apply_meta_extras()
+            logger.info("Running migrations for database: %s", alias)
 
-        logger.info("Migration complete.")
-        return changes
+            # 1. Setup backend and DDL generator for this specific alias
+            try:
+                backend = _core.get_backend(alias)
+                logger.info("Backend for alias '%s': %s", alias, backend)
+            except Exception as e:
+                logger.warning(
+                    "Could not detect backend for alias %s: %s. Falling back to %s",
+                    alias,
+                    e,
+                    self._fallback_backend,
+                )
+                backend = self._fallback_backend
+
+            self._current_backend = backend
+            self._ddl = DDLGenerator(backend)
+            self._current_alias = alias
+
+            # 2. Determine which models belong to this database
+            models_for_db = []
+            for model in self._models:
+                # Routing priority: Router -> Meta.database -> default
+                db = None
+                if router:
+                    db = router.db_for_write(model)
+                if not db:
+                    db = getattr(model._meta, "database", None)
+
+                if db == alias or (db is None and alias == "default"):
+                    models_for_db.append(model)
+
+            if not models_for_db:
+                logger.debug("No models mapped to database %s, skipping.", alias)
+                continue
+
+            # 3. Process migrations for this database
+            await self._ensure_migrations_table(alias)
+            current_state = await self._introspect_schema(alias)
+            target_state = project_state_from_models(models_for_db)
+            changes = diff_states(current_state, target_state)
+
+            if not changes:
+                logger.info("Database %s is up to date.", alias)
+            else:
+                logger.info("Detected %d change(s) for %s:", len(changes), alias)
+                for ch in changes:
+                    logger.info("  - [%s] %s", alias, ch)
+
+            if self._dry_run:
+                self._print_dry_run(changes, target_state, alias)
+                all_applied_changes.extend(changes)
+            else:
+                await self._apply_changes(changes, target_state, alias)
+                await self._apply_meta_extras(alias)
+                all_applied_changes.extend(changes)
+
+        logger.info("Multi-DB migration complete.")
+        return all_applied_changes
 
     # Schema introspection
-    async def _introspect_schema(self) -> SchemaState:
+    async def _introspect_schema(self, alias: str) -> SchemaState:
         """Query the live database to build a current SchemaState."""
         state = SchemaState()
 
-        tables = await self._get_tables()
+        tables = await self._get_tables(alias)
         for table_name in tables:
             if not table_name or table_name.startswith("ryx_"):
                 continue
-            columns = await self._get_columns(table_name)
+            columns = await self._get_columns(table_name, alias)
             tbl = TableState(name=table_name)
             for col in columns:
                 tbl.add_column(col)
@@ -116,7 +167,7 @@ class MigrationRunner:
 
         return state
 
-    async def _get_tables(self) -> List[str]:
+    async def _get_tables(self, alias: str) -> List[str]:
         """Return the list of user table names from the live DB."""
         from ryx.executor_helpers import raw_fetch
 
@@ -124,7 +175,8 @@ class MigrationRunner:
         try:
             rows = await raw_fetch(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+                alias=alias,
             )
             if rows:
                 return [r.get("table_name", "") for r in rows]
@@ -134,13 +186,14 @@ class MigrationRunner:
         # SQLite fallback
         try:
             rows = await raw_fetch(
-                "SELECT name AS table_name FROM sqlite_master WHERE type='table'"
+                "SELECT name AS table_name FROM sqlite_master WHERE type='table'",
+                alias=alias,
             )
             return [r.get("table_name", "") for r in rows]
         except Exception:
             return []
 
-    async def _get_columns(self, table_name: str) -> List[ColumnState]:
+    async def _get_columns(self, table_name: str, alias: str) -> List[ColumnState]:
         """Return ColumnState objects for each column in the given table."""
         from ryx.executor_helpers import raw_fetch
 
@@ -151,7 +204,8 @@ class MigrationRunner:
             rows = await raw_fetch(
                 f"SELECT column_name, data_type, is_nullable, column_default "
                 f"FROM information_schema.columns "
-                f"WHERE table_name = '{table_name}' ORDER BY ordinal_position"
+                f"WHERE table_name = '{table_name}' ORDER BY ordinal_position",
+                alias=alias,
             )
             if rows:
                 for row in rows:
@@ -169,7 +223,7 @@ class MigrationRunner:
 
         # SQLite PRAGMA
         try:
-            rows = await raw_fetch(f'PRAGMA table_info("{table_name}")')
+            rows = await raw_fetch(f'PRAGMA table_info("{table_name}")', alias=alias)
             for row in rows:
                 cols.append(
                     ColumnState(
@@ -186,16 +240,18 @@ class MigrationRunner:
         return cols
 
     # DDL execution
-    def _print_dry_run(self, changes: List[SchemaChange], target: SchemaState) -> None:
+    def _print_dry_run(
+        self, changes: List[SchemaChange], target: SchemaState, alias: str
+    ) -> None:
         """Print the SQL that would be executed."""
-        logger.info("[DRY RUN] SQL that would be executed:")
+        logger.info("[DRY RUN] SQL for database %s that would be executed:", alias)
         for ch in changes:
             sql = self._ddl_for_change(ch, target)
             if sql:
                 logger.info("  %s;", sql)
 
     async def _apply_changes(
-        self, changes: List[SchemaChange], target: SchemaState
+        self, changes: List[SchemaChange], target: SchemaState, alias: str
     ) -> None:
         """Execute DDL for each detected change."""
         from ryx.executor_helpers import raw_execute
@@ -204,12 +260,12 @@ class MigrationRunner:
             sql = self._ddl_for_change(ch, target)
             if not sql:
                 continue
-            logger.info("Applying: %s", ch)
+            logger.info("[%s] Applying: %s", alias, ch)
             logger.debug("SQL: %s", sql)
             try:
-                await raw_execute(sql)
+                await raw_execute(sql, alias=alias)
             except Exception as e:
-                logger.error("DDL failed: %s — %s", sql, e)
+                logger.error("DDL failed on %s: %s — %s", alias, sql, e)
                 raise
 
     def _ddl_for_change(
@@ -231,10 +287,11 @@ class MigrationRunner:
                 logger.warning(
                     "ALTER COLUMN not supported on %s for %s.%s — "
                     "manual migration required.",
-                    self._backend,
+                    self._current_backend,
                     change.table,
                     change.column,
                 )
+
             return sql
 
         else:
@@ -248,7 +305,7 @@ class MigrationRunner:
 
         return None
 
-    async def _apply_meta_extras(self) -> None:
+    async def _apply_meta_extras(self, alias: str) -> None:
         """Apply indexes, unique_together, and constraints from Meta classes.
 
         These are idempotent (IF NOT EXISTS) so safe to re-run on every migrate.
@@ -261,12 +318,26 @@ class MigrationRunner:
             meta = model._meta
             table = meta.table_name
 
+            # Only apply if the model belongs to this database
+            # (Basically duplicate the routing logic here or use a helper)
+            from ryx.router import get_router
+
+            router = get_router()
+            db = None
+            if router:
+                db = router.db_for_write(model)
+            if not db:
+                db = getattr(meta, "database", None)
+
+            if db != alias and (db is not None or alias != "default"):
+                continue
+
             # Named indexes from Meta.indexes
             for idx in meta.indexes:
                 sql = self._ddl.create_index(table, idx)
                 logger.debug("Index DDL: %s", sql)
                 try:
-                    await raw_execute(sql)
+                    await raw_execute(sql, alias=alias)
                 except Exception as e:
                     logger.debug("Index already exists or error: %s", e)
 
@@ -275,7 +346,7 @@ class MigrationRunner:
                 name = f"idx_{table}_{'_'.join(fields)}_{i}"
                 sql = self._ddl.create_index_from_fields(table, list(fields), name)
                 try:
-                    await raw_execute(sql)
+                    await raw_execute(sql, alias=alias)
                 except Exception:
                     pass
 
@@ -286,7 +357,7 @@ class MigrationRunner:
                     table, list(fields), name, unique=True
                 )
                 try:
-                    await raw_execute(sql)
+                    await raw_execute(sql, alias=alias)
                 except Exception:
                     pass
 
@@ -295,15 +366,15 @@ class MigrationRunner:
                 sql = self._ddl.add_constraint(table, constraint)
                 if sql:
                     try:
-                        await raw_execute(sql)
+                        await raw_execute(sql, alias=alias)
                     except Exception:
                         pass  # constraint may already exist
 
             # ManyToMany join tables
             for fname, m2m_field in meta.many_to_many.items():
-                await self._ensure_m2m_table(m2m_field)
+                await self._ensure_m2m_table(m2m_field, alias)
 
-    async def _ensure_m2m_table(self, m2m_field) -> None:
+    async def _ensure_m2m_table(self, m2m_field, alias: str) -> None:
         """Create the join table for a ManyToManyField if it doesn't exist."""
         from ryx.executor_helpers import raw_execute
         from ryx.migrations.state import TableState, ColumnState
@@ -323,7 +394,7 @@ class MigrationRunner:
         sql = self._ddl.create_table(tbl)
 
         try:
-            await raw_execute(sql)
+            await raw_execute(sql, alias=alias)
             # Unique constraint on (source_fk, target_fk) to prevent duplicates
             uq_sql = self._ddl.create_index_from_fields(
                 join_table,
@@ -331,12 +402,12 @@ class MigrationRunner:
                 f"uq_{join_table}_pair",
                 unique=True,
             )
-            await raw_execute(uq_sql)
+            await raw_execute(uq_sql, alias=alias)
         except Exception:
             pass  # join table already exists
 
     # Migrations tracking table
-    async def _ensure_migrations_table(self) -> None:
+    async def _ensure_migrations_table(self, alias: str) -> None:
         """Create the Ryx migrations tracking table if it doesn't exist."""
         from ryx.executor_helpers import raw_execute
 
@@ -347,6 +418,6 @@ class MigrationRunner:
 
         sql = self._ddl.create_table(tbl)
         try:
-            await raw_execute(sql)
+            await raw_execute(sql, alias=alias)
         except Exception:
             pass  # table already exists
