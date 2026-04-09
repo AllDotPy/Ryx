@@ -256,6 +256,7 @@ class QuerySet:
         _select_columns: Optional[List[str]] = None,
         _annotations: Optional[List[dict]] = None,
         _group_by: Optional[List[str]] = None,
+        _using: Optional[str] = None,
     ) -> None:
 
         self._model = model
@@ -265,6 +266,7 @@ class QuerySet:
         self._select_columns = _select_columns
         self._annotations = _annotations or []
         self._group_by = _group_by or []
+        self._using = _using
 
     def _clone(self, builder=None, **overrides) -> "QuerySet":
         return QuerySet(
@@ -273,6 +275,7 @@ class QuerySet:
             _select_columns=overrides.get("_select_columns", self._select_columns),
             _annotations=overrides.get("_annotations", list(self._annotations)),
             _group_by=overrides.get("_group_by", list(self._group_by)),
+            _using=overrides.get("_using", self._using),
         )
 
     def _validate_filters(self, kwargs: Dict[str, Any]) -> None:
@@ -558,8 +561,12 @@ class QuerySet:
         )
 
     def using(self, alias: str) -> "QuerySet":
-        """Stub for multi-database routing (planned feature)."""
-        return self._clone()
+        """Switch the database used for this query.
+
+        Example::
+            posts = await Post.objects.using("replica").filter(active=True)
+        """
+        return self._clone(_using=alias)
 
     # Evaluation (async)
     def cache(
@@ -606,14 +613,35 @@ class QuerySet:
         return self._execute().__await__()
 
     async def _execute(self) -> list:
-        raw_rows = await self._builder.fetch_all()
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
+        raw_rows = await builder.fetch_all()
         return [self._model._from_row(row) for row in raw_rows]
 
     async def count(self) -> int:
-        return await self._builder.fetch_count()
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
+        return await builder.fetch_count()
 
     async def first(self) -> Optional["Model"]:
-        raw = await self._builder.set_limit(1).fetch_first()
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
+        raw = await builder.set_limit(1).fetch_first()
         return None if raw is None else self._model._from_row(raw)
 
     async def last(self) -> Optional["Model"]:
@@ -625,8 +653,16 @@ class QuerySet:
     async def get(self, *q_args: Q, **kwargs: Any) -> "Model":
         """Return exactly one instance. Raises DoesNotExist / MultipleObjectsReturned."""
         qs = self.filter(*q_args, **kwargs) if (q_args or kwargs) else self
+
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = qs._using or qs._model._meta.database
+
+        builder = qs._builder
+        if alias:
+            builder = builder.set_using(alias)
+
         try:
-            raw = await qs._builder.fetch_get()
+            raw = await builder.fetch_get()
         except RuntimeError as e:
             msg = str(e)
             if "No matching" in msg:
@@ -641,13 +677,27 @@ class QuerySet:
         return self._model._from_row(raw)
 
     async def exists(self) -> bool:
-        return await self.count() > 0
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
+        return await builder.count() > 0
 
     async def delete(self) -> int:
         """Bulk delete. Fires pre_bulk_delete / post_bulk_delete signals."""
 
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
         await pre_bulk_delete.send(sender=self._model, queryset=self)
-        n = await self._builder.execute_delete()
+        n = await builder.execute_delete()
         await post_bulk_delete.send(sender=self._model, queryset=self, deleted_count=n)
         return n
 
@@ -658,8 +708,15 @@ class QuerySet:
     async def update(self, **kwargs: Any) -> int:
         """Bulk update. Fires pre_update / post_update signals."""
 
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
         await pre_update.send(sender=self._model, queryset=self, fields=kwargs)
-        n = await self._builder.execute_update(list(kwargs.items()))
+        n = await builder.execute_update(list(kwargs.items()))
         await post_update.send(
             sender=self._model, queryset=self, updated_count=n, fields=kwargs
         )

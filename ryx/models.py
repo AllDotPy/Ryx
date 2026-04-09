@@ -93,6 +93,7 @@ class Options:
     Attributes:
         table_name       : SQL table name.
         app_label        : Optional namespace prefix.
+        database         : Optional database alias (e.g. "logs").
         fields           : Ordered dict name → Field.
         many_to_many     : Dict name → ManyToManyField (populated by M2M fields).
         pk_field         : The primary key Field.
@@ -113,7 +114,9 @@ class Options:
             self.table_name = _to_table_name(model_name)
 
         self.app_label: str = getattr(meta_class, "app_label", "")
+        self.database: Optional[str] = getattr(meta_class, "database", None)
         self.ordering: List[str] = list(getattr(meta_class, "ordering", []))
+
         self.unique_together: List[tuple] = list(
             getattr(meta_class, "unique_together", [])
         )
