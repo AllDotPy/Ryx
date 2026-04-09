@@ -182,8 +182,18 @@ pub fn get(alias: Option<&str>) -> RyxResult<Arc<AnyPool>> {
 }
  
 /// Check whether the pool registry has been initialized.
-pub fn is_initialized() -> bool {
-    REGISTRY.get().is_some()
+pub fn is_initialized(alias: Option<String>) -> bool {
+    
+    // Alias provided
+    if alias.is_some(){
+        REGISTRY.get().is_some_and(|f| {
+            f.read().is_ok_and(|pc| pc.pools.contains_key(alias.unwrap().as_str()))
+        })
+    }
+    // Else is the registry not none?
+    else {
+        REGISTRY.get().is_some()
+    }
 }
  
 /// Retrieve the backend type for a specific pool.

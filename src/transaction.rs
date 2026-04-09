@@ -66,18 +66,20 @@ pub fn get_current_transaction() -> Option<Arc<Mutex<Option<TransactionHandle>>>
 pub struct TransactionHandle {
     inner: Arc<Mutex<Option<Transaction<'static, Any>>>>,
     savepoints: Vec<String>,
+    pub alias: Option<String>,
 }
 
 impl TransactionHandle {
     /// Begin a new transaction by acquiring a connection from the pool.
-    pub async fn begin() -> RyxResult<Self> {
-        let pool = pool::get(None)?;
-        debug!("Beginning transaction");
+    pub async fn begin(alias: Option<String>) -> RyxResult<Self> {
+        let pool = pool::get(alias.as_deref())?;
+        debug!("Beginning transaction for alias: {:?}", alias);
         let tx = pool.begin().await.map_err(RyxError::Database)?;
 
         Ok(Self {
             inner: Arc::new(Mutex::new(Some(tx))),
             savepoints: Vec::new(),
+            alias: alias.clone(),
         })
     }
 

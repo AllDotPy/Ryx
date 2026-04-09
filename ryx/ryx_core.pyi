@@ -35,12 +35,11 @@ from typing import Any, Optional
 __version__: str
 """Semver version of the compiled Rust core, e.g. ``"0.2.0"``."""
 
-# ---------------------------------------------------------------------------
+# 
 # Module-level functions
-# ---------------------------------------------------------------------------
-
+# 
 async def setup(
-    url: str,
+    urls: dict, 
     max_connections: int = 10,
     min_connections: int = 1,
     connect_timeout: int = 30,
@@ -139,7 +138,7 @@ def list_transforms() -> list[str]:
     ...
 
 
-def is_connected() -> bool:
+def is_connected(alias: str = 'default') -> bool:
     """Return ``True`` if ``setup()`` has been called successfully.
 
     Pure in-memory check — no database round-trip.
@@ -354,10 +353,7 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
     # Filter / WHERE
-    # ------------------------------------------------------------------
-
     def add_filter(
         self,
         field: str,
@@ -447,10 +443,7 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
     # Aggregation / GROUP BY
-    # ------------------------------------------------------------------
-
     def add_annotation(
         self,
         alias: str,
@@ -495,10 +488,7 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
     # JOIN
-    # ------------------------------------------------------------------
-
     def add_join(
         self,
         kind: str,
@@ -538,10 +528,7 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
     # Ordering / pagination
-    # ------------------------------------------------------------------
-
     def add_order_by(self, field: str) -> "QueryBuilder":
         """Append an ``ORDER BY`` term.
 
@@ -597,10 +584,16 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
-    # Introspection
-    # ------------------------------------------------------------------
+    def set_using(alias: str) -> "QueryBuilder":
+        """Set the database to use for this query
+        
+        Returns
+        -------
+        A new ``QueryBuilder`` with bd_alias set to the new alias.
+        """
+        ...
 
+    # Introspection
     def compiled_sql(self) -> str:
         """Return the compiled SQL string without executing the query.
 
@@ -622,10 +615,7 @@ class QueryBuilder:
         """
         ...
 
-    # ------------------------------------------------------------------
     # Async execution
-    # ------------------------------------------------------------------
-
     async def fetch_all(self) -> list[dict[str, Any]]:
         """Execute the current SELECT and return all matching rows.
 
@@ -799,10 +789,9 @@ class QueryBuilder:
         ...
 
 
-# ---------------------------------------------------------------------------
+#
 # TransactionHandle
-# ---------------------------------------------------------------------------
-
+#
 class TransactionHandle:
     """A live database transaction, owned by the Rust ``Arc<Mutex<Option<…>>>``.
 

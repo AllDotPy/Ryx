@@ -44,12 +44,12 @@ fn setup<'py>(
     idle_timeout: u64,
     max_lifetime: u64,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let urls_py = urls.downcast::<PyDict>()?;
+    let urls_py = urls.cast::<PyDict>()?;
     let mut database_urls = HashMap::new();
  
     for (key, value) in urls_py.iter() {
-        let alias = key.downcast::<PyString>()?.to_str()?.to_string();
-        let url = value.downcast::<PyString>()?.to_str()?.to_string();
+        let alias = key.cast::<PyString>()?.to_str()?.to_string();
+        let url = value.cast::<PyString>()?.to_str()?.to_string();
         database_urls.insert(alias, url);
     }
  
@@ -90,7 +90,7 @@ fn list_transforms() -> Vec<&'static str> {
 #[pyfunction]
 fn is_connected(_py: Python<'_>, alias: Option<String>) -> bool {
     // For now we just check if the registry is initialized
-    pool::is_initialized()
+    pool::is_initialized(alias)
 }
 
 #[pyfunction]
@@ -103,12 +103,17 @@ fn pool_stats<'py>(py: Python<'py>, alias: Option<String>) -> PyResult<Bound<'py
 }
 
 #[pyfunction]
-fn raw_fetch<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
+#[pyo3(signature = (sql, alias=None))]
+fn raw_fetch<'py>(
+    py: Python<'py>,
+    sql: String,
+    alias: Option<String>,
+) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let compiled = compiler::CompiledQuery {
             sql,
             values: vec![],
-            db_alias: None,
+            db_alias: alias,
         };
         let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| {
@@ -119,17 +124,23 @@ fn raw_fetch<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
 }
  
 #[pyfunction]
-fn raw_execute<'py>(py: Python<'py>, sql: String) -> PyResult<Bound<'py, PyAny>> {
+#[pyo3(signature = (sql, alias=None))]
+fn raw_execute<'py>(
+    py: Python<'py>,
+    sql: String,
+    alias: Option<String>,
+) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let compiled = compiler::CompiledQuery {
             sql,
             values: vec![],
-            db_alias: None,
+            db_alias: alias,
         };
         executor::execute(compiled).await.map_err(PyErr::from)?;
         Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
     })
 }
+
 
 
 // ###
@@ -571,6 +582,15 @@ pub struct PyTransactionHandle {
 
 #[pymethods]
 impl PyTransactionHandle {
+    fn get_alias(&self) -> PyResult<Option<String>> {
+        let h = self.handle.blocking_lock();
+        if let Some(tx) = h.as_ref() {
+            Ok(tx.alias.clone())
+        } else {
+            Ok(None)
+        }
+    }
+
     fn commit<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let h = self.handle.clone();
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -635,9 +655,13 @@ impl PyTransactionHandle {
 }
 
 #[pyfunction]
-fn begin_transaction<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+fn begin_transaction<'py>(
+    py: Python<'py>,
+    alias: Option<Bound<'_, PyString>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let alias_str = alias.map(|s| s.to_string());
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let handle = TransactionHandle::begin().await.map_err(PyErr::from)?;
+        let handle = TransactionHandle::begin(alias_str).await.map_err(PyErr::from)?;
         Python::attach(|py| {
             let py_handle = PyTransactionHandle {
                 handle: Arc::new(TokioMutex::new(Some(handle))),
