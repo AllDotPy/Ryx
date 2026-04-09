@@ -612,9 +612,39 @@ class QuerySet:
     def __await__(self):
         return self._execute().__await__()
 
+    def _resolve_db_alias(self, operation: str = "read") -> str:
+        """
+        Resolve the database alias based on priority:
+        1. .using(alias)
+        2. Router.db_for_read/write
+        3. Model.Meta.database
+        4. 'default'
+        """
+        # 1. Explicitly set via .using()
+        if self._using:
+            return self._using
+
+        # 2. Dynamic Router
+        from ryx.router import get_router
+
+        router = get_router()
+        if router:
+            if operation == "read":
+                res = router.db_for_read(self._model)
+            else:
+                res = router.db_for_write(self._model)
+            if res:
+                return res
+
+        # 3. Model Meta
+        if self._model._meta.database:
+            return self._model._meta.database
+
+        # 4. Fallback
+        return "default"
+
     async def _execute(self) -> list:
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
+        alias = self._resolve_db_alias("read")
 
         builder = self._builder
         if alias:
@@ -624,8 +654,7 @@ class QuerySet:
         return [self._model._from_row(row) for row in raw_rows]
 
     async def count(self) -> int:
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
+        alias = self._resolve_db_alias("read")
 
         builder = self._builder
         if alias:
@@ -634,8 +663,7 @@ class QuerySet:
         return await builder.fetch_count()
 
     async def first(self) -> Optional["Model"]:
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
+        alias = self._resolve_db_alias("read")
 
         builder = self._builder
         if alias:
@@ -644,18 +672,11 @@ class QuerySet:
         raw = await builder.set_limit(1).fetch_first()
         return None if raw is None else self._model._from_row(raw)
 
-    async def last(self) -> Optional["Model"]:
-        # Support explicit ordering from .order_by(...).last().
-        # If no rows, return None.
-        results = await self._execute()
-        return results[-1] if results else None
-
     async def get(self, *q_args: Q, **kwargs: Any) -> "Model":
         """Return exactly one instance. Raises DoesNotExist / MultipleObjectsReturned."""
         qs = self.filter(*q_args, **kwargs) if (q_args or kwargs) else self
 
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = qs._using or qs._model._meta.database
+        alias = qs._resolve_db_alias("read")
 
         builder = qs._builder
         if alias:
@@ -677,8 +698,7 @@ class QuerySet:
         return self._model._from_row(raw)
 
     async def exists(self) -> bool:
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
+        alias = self._resolve_db_alias("read")
 
         builder = self._builder
         if alias:
@@ -689,8 +709,7 @@ class QuerySet:
     async def delete(self) -> int:
         """Bulk delete. Fires pre_bulk_delete / post_bulk_delete signals."""
 
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
+        alias = self._resolve_db_alias("write")
 
         builder = self._builder
         if alias:
@@ -699,6 +718,22 @@ class QuerySet:
         await pre_bulk_delete.send(sender=self._model, queryset=self)
         n = await builder.execute_delete()
         await post_bulk_delete.send(sender=self._model, queryset=self, deleted_count=n)
+        return n
+
+    async def update(self, **kwargs: Any) -> int:
+        """Bulk update. Fires pre_update / post_update signals."""
+
+        alias = self._resolve_db_alias("write")
+
+        builder = self._builder
+        if alias:
+            builder = builder.set_using(alias)
+
+        await pre_update.send(sender=self._model, queryset=self, fields=kwargs)
+        n = await builder.execute_update(list(kwargs.items()))
+        await post_update.send(
+            sender=self._model, queryset=self, updated_count=n, fields=kwargs
+        )
         return n
 
     async def bulk_delete(self) -> int:

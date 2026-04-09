@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from ryx import ryx_core as _core
 from ryx.exceptions import DoesNotExist, MultipleObjectsReturned
@@ -161,7 +161,7 @@ class Manager:
     """Default query manager. Proxies to QuerySet."""
 
     def __init__(self) -> None:
-        self._model: Optional[type] = None
+        self._model: Optional[type[Model]] = None
 
     def contribute_to_class(self, model: type, name: str) -> None:
         self._model = model
@@ -532,6 +532,16 @@ class Model(metaclass=ModelMetaclass):
         # pre_save signal
         await pre_save.send(sender=type(self), instance=self, created=created)
 
+        # Resolve database alias: Router.db_for_write -> Meta.database -> 'default'
+        from ryx.router import get_router
+
+        router = get_router()
+        alias = None
+        if router:
+            alias = router.db_for_write(type(self))
+        if not alias:
+            alias = self._meta.database
+
         # SQL execution
         # Creation
         if created:
@@ -545,6 +555,8 @@ class Model(metaclass=ModelMetaclass):
                 (f.column, f.to_db(getattr(self, f.attname))) for f in fields_to_save
             ]
             builder = _core.QueryBuilder(self._meta.table_name)
+            if alias:
+                builder = builder.set_using(alias)
             new_id = await builder.execute_insert(values, returning_id=True)
             if self._meta.pk_field:
                 object.__setattr__(self, self._meta.pk_field.attname, new_id)
@@ -569,6 +581,8 @@ class Model(metaclass=ModelMetaclass):
             ]
             pk_field = self._meta.pk_field
             builder = _core.QueryBuilder(self._meta.table_name)
+            if alias:
+                builder = builder.set_using(alias)
             builder = builder.add_filter(
                 pk_field.column, "exact", self.pk, negated=False
             )
@@ -594,10 +608,22 @@ class Model(metaclass=ModelMetaclass):
         await self.before_delete()
         await pre_delete.send(sender=type(self), instance=self)
 
+        # Resolve database alias: Router.db_for_write -> Meta.database -> 'default'
+        from ryx.router import get_router
+
+        router = get_router()
+        alias = None
+        if router:
+            alias = router.db_for_write(type(self))
+        if not alias:
+            alias = self._meta.database
+
         from ryx import ryx_core as _core
 
         pk_field = self._meta.pk_field
         builder = _core.QueryBuilder(self._meta.table_name)
+        if alias:
+            builder = builder.set_using(alias)
         builder = builder.add_filter(pk_field.column, "exact", self.pk, negated=False)
         await builder.execute_delete()
 
