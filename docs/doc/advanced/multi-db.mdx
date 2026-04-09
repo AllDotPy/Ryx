@@ -1,0 +1,99 @@
+---
+sidebar_position: 11
+title: Multi-Database Support
+description: Learn how to route queries across multiple databases in Ryx.
+---
+
+Ryx supports routing queries across multiple databases, allowing you to separate read and write workloads, split data across different servers, or use a dedicated database for specific models.
+
+## Configuration
+
+To enable multi-database support, provide a dictionary of URLs to `ryx_core.setup` instead of a single string. Each key in the dictionary serves as an **alias** for that database pool.
+
+```python
+from ryx import ryx_core
+
+# Configure multiple databases
+urls = {
+    "default": "postgresql://user:pass@localhost/main_db",
+    "users": "postgresql://user:pass@localhost/user_db",
+    "logs": "sqlite::memory:",
+}
+
+await ryx_core.setup(urls)
+```
+
+## Routing Strategies
+
+Ryx resolves which database to use for a query in the following order of priority:
+
+1. **Explicit Routing**: Using `.using(alias)` on a QuerySet.
+2. **Dynamic Router**: Using a configured `BaseRouter`.
+3. **Model Metadata**: Using the `database` option in `Model.Meta`.
+4. **Default**: Falling back to the `'default'` alias.
+
+### 1. Explicit Routing
+
+You can force a query to run on a specific database using the `.using()` method. This is useful for one-off queries or manual routing.
+
+```python
+# Read from the 'users' database
+users = await User.objects.using("users").all()
+
+# Write to the 'logs' database
+await Log.objects.using("logs").create(message="System boot")
+```
+
+### 2. Model-Level Routing
+
+You can assign a model to a specific database by default using the `database` option in its `Meta` class.
+
+```python
+class Log(Model):
+    message = CharField()
+
+    class Meta:
+        database = "logs"
+```
+
+Any query on `Log` will now use the `logs` database unless overridden by `.using()`.
+
+### 3. Dynamic Routing (The Router)
+
+For more complex logic (e.g., routing based on the environment, user, or model type), you can implement a custom router by inheriting from `BaseRouter`.
+
+```python
+from ryx.router import BaseRouter, set_router
+
+class MyProjectRouter(BaseRouter):
+    def db_for_read(self, model, **hints):
+        if model.__name__ == "User":
+            return "users"
+        return None  # Fallback to default
+
+    def db_for_write(self, model, **hints):
+        if model.__name__ == "User":
+            return "users"
+        return None
+
+# Activate the router globally
+set_router(MyProjectRouter())
+```
+
+## Multi-Database Transactions
+
+Transactions in Ryx are tied to a specific database connection. To start a transaction on a non-default database, pass the `alias` to the `transaction()` context manager.
+
+```python
+import ryx
+
+async with Ryx.transaction(alias="users"):
+    await User.objects.create(name="Alice")
+    await User.objects.create(name="Bob")
+    # If an exception occurs, only changes to 'users' DB are rolled back.
+```
+
+### Nesting and Multiple Databases
+
+- If you start a transaction on a database that already has an active transaction on the current task, Ryx creates a **SAVEPOINT**.
+- If you start a transaction on a *different* database while another is active, Ryx starts a new independent transaction for that database.

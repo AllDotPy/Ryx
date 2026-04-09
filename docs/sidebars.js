@@ -70,6 +70,7 @@ const sidebars = {
         'advanced/caching',
         'advanced/custom-lookups',
         'advanced/sync-async',
+        'advanced/multi-db',
         'advanced/raw-sql',
         'advanced/cli',
       ],

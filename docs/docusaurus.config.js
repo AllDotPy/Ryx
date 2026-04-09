@@ -62,7 +62,7 @@ const config = {
           },
           {
             type: 'custom-search-bar',
-            position: 'right',
+            position: 'center',
           },
           {
             type: 'custom-github-stats',

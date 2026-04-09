@@ -4,8 +4,8 @@ import type { Config } from '@docusaurus/types';
 const config: Config = {
   title: 'Ryx ORM',
   tagline: 'Django-style Python ORM. Powered by Rust.',
-  favicon: 'img/favicon.ico',
-  url: 'https://ryx.alldotpy.dev',
+  favicon: 'img/logo.svg',
+  url: 'https://ryx.alldotpy.com',
   baseUrl: '/',
   organizationName: 'AllDotPy',
   projectName: 'Ryx',
