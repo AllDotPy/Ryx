@@ -770,6 +770,44 @@ fn bulk_delete<'py>(
     })
 }
 
+/// Bulk insert: values are mapped in Rust then executed in a single FFI call.
+#[pyfunction]
+#[pyo3(signature = (table, columns, rows, returning_id=true, ignore_conflicts=false))]
+fn bulk_insert<'py>(
+    py: Python<'py>,
+    table: String,
+    columns: Vec<String>,
+    rows: Vec<Vec<Bound<'_, PyAny>>>,
+    returning_id: bool,
+    ignore_conflicts: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut rust_rows: Vec<Vec<SqlValue>> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut vals = Vec::with_capacity(row.len());
+        for v in row {
+            vals.push(py_to_sql_value(&v)?);
+        }
+        rust_rows.push(vals);
+    }
+
+    pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        let res = executor::bulk_insert(
+            table,
+            columns,
+            rust_rows,
+            returning_id,
+            ignore_conflicts,
+            None,
+        )
+        .await
+        .map_err(PyErr::from)?;
+        Python::attach(|py| match res.last_insert_id {
+            Some(id) => Ok(id.into_pyobject(py)?.unbind()),
+            None => Ok(res.rows_affected.into_pyobject(py)?.unbind()),
+        })
+    })
+}
+
 /// Bulk update using CASE WHEN in a single FFI call.
 ///
 /// Builds a single UPDATE statement with CASE WHEN clauses:
@@ -828,25 +866,13 @@ fn bulk_update<'py>(
         }
 
         // WHERE IN clause
-        let pk_placeholders: Vec<String> = (0..n).map(|_| "?".to_string()).collect();
         for pk in &pk_values {
             all_values.push(pk.clone());
         }
 
-        let sql = format!(
-            "UPDATE \"{}\" SET {} WHERE \"{}\" IN ({})",
-            table,
-            case_clauses.join(", "),
-            pk_col,
-            pk_placeholders.join(", ")
-        );
-
-        let compiled = compiler::CompiledQuery {
-            sql,
-            values: all_values.into(),
-            db_alias: None,
-        };
-        let result = executor::execute(compiled).await.map_err(PyErr::from)?;
+        let result = executor::bulk_update(table, pk_col, col_names, field_values, pk_values, None)
+            .await
+            .map_err(PyErr::from)?;
         Python::attach(|py| {
             let n = (result.rows_affected as i64).into_pyobject(py)?;
             Ok(n.unbind())
@@ -882,6 +908,7 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(raw_execute, m)?)?;
     m.add_function(wrap_pyfunction!(execute_with_params, m)?)?;
     m.add_function(wrap_pyfunction!(fetch_with_params, m)?)?;
+    m.add_function(wrap_pyfunction!(bulk_insert, m)?)?;
     m.add_function(wrap_pyfunction!(bulk_delete, m)?)?;
     m.add_function(wrap_pyfunction!(bulk_update, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;

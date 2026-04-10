@@ -293,19 +293,20 @@ pub async fn execute_compiled(node: QueryNode) -> RyxResult<MutationResult> {
     execute(compiled).await
 }
 
-/// Bulk insert rows in one shot.
-/// Bulk insert rows with values already mapped to SqlValue.
+/// Bulk insert rows with values already mapped to SqlValue in one shot.
 pub async fn bulk_insert(
     table: String,
     columns: Vec<String>,
     rows: Vec<Vec<SqlValue>>,
     returning_id: bool,
+    ignore_conflicts: bool,
     db_alias: Option<String>,
 ) -> RyxResult<MutationResult> {
     if rows.is_empty() {
         return Ok(MutationResult { rows_affected: 0, last_insert_id: None });
     }
     let pool = pool::get(db_alias.as_deref())?;
+    let backend = pool::get_backend(db_alias.as_deref())?;
 
     let col_list = columns.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", ");
     let row_ph = format!("({})", std::iter::repeat("?").take(columns.len()).collect::<Vec<_>>().join(", "));
@@ -318,11 +319,23 @@ pub async fn bulk_insert(
         }
     }
 
+    let (insert_kw, conflict_suffix) = if ignore_conflicts {
+        match backend {
+            ryx_query::Backend::PostgreSQL => ("INSERT INTO", " ON CONFLICT DO NOTHING"),
+            ryx_query::Backend::MySQL => ("INSERT IGNORE INTO", ""),
+            ryx_query::Backend::SQLite => ("INSERT OR IGNORE INTO", ""),
+        }
+    } else {
+        ("INSERT INTO", "")
+    };
+
     let sql = format!(
-        "INSERT INTO \"{}\" ({}) VALUES {}{}",
+        "{} \"{}\" ({}) VALUES {}{}{}",
+        insert_kw,
         table,
         col_list,
         values_sql,
+        conflict_suffix,
         if returning_id { " RETURNING id" } else { "" }
     );
     let mut q = sqlx::query(&sql);
@@ -337,8 +350,7 @@ pub async fn bulk_insert(
     }
 }
 
-/// Bulk delete by PK list in one shot.
-/// Bulk delete by primary key values.
+/// Bulk delete by primary key values in one shot.
 pub async fn bulk_delete(
     table: String,
     pk_col: String,
@@ -356,6 +368,56 @@ pub async fn bulk_delete(
     );
     let mut q = sqlx::query(&sql);
     q = bind_values(q, &pks);
+    let res = q.execute(&*pool).await.map_err(RyxError::Database)?;
+    Ok(MutationResult { rows_affected: res.rows_affected(), last_insert_id: None })
+}
+
+/// Bulk update using CASE WHEN, values already mapped to SqlValue.
+pub async fn bulk_update(
+    table: String,
+    pk_col: String,
+    col_names: Vec<String>,
+    field_values: Vec<Vec<SqlValue>>,
+    pks: Vec<SqlValue>,
+    db_alias: Option<String>,
+) -> RyxResult<MutationResult> {
+    let pool = pool::get(db_alias.as_deref())?;
+    let n = pks.len();
+    let f = field_values.len();
+    if n == 0 || f == 0 {
+        return Ok(MutationResult { rows_affected: 0, last_insert_id: None });
+    }
+
+    let mut case_clauses = Vec::with_capacity(f);
+    let mut all_values: SmallVec<[SqlValue; 8]> = SmallVec::with_capacity(n * f * 2 + n);
+
+    for (fi, col_name) in col_names.iter().enumerate() {
+        let mut case_parts = Vec::with_capacity(n * 3 + 2);
+        case_parts.push(format!("\"{}\" = CASE \"{}\"", col_name, pk_col));
+        for i in 0..n {
+            case_parts.push("WHEN ? THEN ?".to_string());
+            all_values.push(pks[i].clone());
+            all_values.push(field_values[fi][i].clone());
+        }
+        case_parts.push("END".to_string());
+        case_clauses.push(case_parts.join(" "));
+    }
+
+    let pk_placeholders: Vec<String> = (0..n).map(|_| "?".to_string()).collect();
+    for pk in &pks {
+        all_values.push(pk.clone());
+    }
+
+    let sql = format!(
+        "UPDATE \"{}\" SET {} WHERE \"{}\" IN ({})",
+        table,
+        case_clauses.join(", "),
+        pk_col,
+        pk_placeholders.join(", ")
+    );
+
+    let mut q = sqlx::query(&sql);
+    q = bind_values(q, &all_values);
     let res = q.execute(&*pool).await.map_err(RyxError::Database)?;
     Ok(MutationResult { rows_affected: res.rows_affected(), last_insert_id: None })
 }
