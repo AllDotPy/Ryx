@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 use sqlx::{Any, Transaction};
-use tracing::{debug, instrument};
+use tracing::debug;
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;
@@ -171,7 +171,7 @@ impl TransactionHandle {
     pub async fn fetch_query(
         &self,
         query: CompiledQuery,
-    ) -> RyxResult<Vec<std::collections::HashMap<String, serde_json::Value>>> {
+    ) -> RyxResult<Vec<std::collections::HashMap<String, SqlValue>>> {
         let mut guard = self.inner.lock().await;
         let tx = guard.as_mut().ok_or_else(|| {
             RyxError::Internal("Transaction already committed or rolled back".into())
@@ -191,19 +191,17 @@ impl TransactionHandle {
                 let mut map = std::collections::HashMap::new();
                 for col in row.columns() {
                     let name = col.name().to_string();
-                    let val: serde_json::Value =
+                    let val =
                         if let Ok(b) = row.try_get::<bool, _>(col.ordinal()) {
-                            serde_json::Value::Bool(b)
+                            SqlValue::Bool(b)
                         } else if let Ok(i) = row.try_get::<i64, _>(col.ordinal()) {
-                            serde_json::Value::Number(i.into())
+                            SqlValue::Int(i)
                         } else if let Ok(f) = row.try_get::<f64, _>(col.ordinal()) {
-                            serde_json::Number::from_f64(f)
-                                .map(serde_json::Value::Number)
-                                .unwrap_or(serde_json::Value::Null)
+                            SqlValue::Float(f)
                         } else if let Ok(s) = row.try_get::<String, _>(col.ordinal()) {
-                            serde_json::Value::String(s)
+                            SqlValue::Text(s)
                         } else {
-                            serde_json::Value::Null
+                            SqlValue::Null
                         };
                     map.insert(name, val);
                 }

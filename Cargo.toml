@@ -62,6 +62,7 @@ sqlx = { version = "0.8.6", features = [
 # Full tokio runtime. "full" is fine for a library crate — callers can restrict
 # features if they need a lighter binary.
 tokio = { version = "1.40", features = ["full"] }
+smallvec = "1.13"
 
 # ── Serialization ─────────────────────────────────────────────────────────────
 # serde + serde_json: used to pass structured data between Rust and Python

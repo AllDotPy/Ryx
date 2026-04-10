@@ -167,9 +167,6 @@ class Manager:
     def contribute_to_class(self, model: type, name: str) -> None:
         self._model = model
 
-    def contribute_to_class(self, model: type, name: str) -> None:
-        self._model = model
-
     def get_queryset(self):
         from ryx.queryset import QuerySet
 
@@ -292,9 +289,9 @@ class Manager:
     async def bulk_update(
         self, instances: list, fields: list, batch_size: int = 500
     ) -> int:
-        from ryx.bulk import bulk_update
+        from ryx.bulk import bulk_update as _update
 
-        return await bulk_update(self._model, instances, fields, batch_size=batch_size)
+        return await _update(self._model, instances, fields, batch_size=batch_size)
 
     async def bulk_delete(
         self, instances: Optional[list] = None, batch_size: int = 500

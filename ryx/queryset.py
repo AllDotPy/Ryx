@@ -250,7 +250,7 @@ class QuerySet:
 
     def __init__(
         self,
-        model: type,
+        model: Model,
         builder: Optional[_core.QueryBuilder] = None,
         *,
         _select_columns: Optional[List[str]] = None,
@@ -320,13 +320,15 @@ class QuerySet:
             node = q.to_q_node()
             builder = _apply_q_node(builder, node)
 
-        # kwargs (flat filters)
-        for key, val in kwargs.items():
-            # Support Django-style primary key lookup in kwargs
-            if key == "pk":
-                key = self._model._meta.pk_field.attname
-            field, lookup = _parse_lookup_key(key)
-            builder = builder.add_filter(field, lookup, val, negated=False)
+        # kwargs (flat filters) batched to reduce FFI crossings
+        if kwargs:
+            batch = []
+            for key, val in kwargs.items():
+                if key == "pk":
+                    key = self._model._meta.pk_field.attname
+                field, lookup = _parse_lookup_key(key)
+                batch.append((field, lookup, val, False))
+            builder = builder.add_filters_batch(batch)
         return self._clone(builder)
 
     def exclude(self, *q_args: Q, **kwargs: Any) -> "QuerySet":
@@ -336,9 +338,12 @@ class QuerySet:
         for q in q_args:
             builder = _apply_q_node(builder, (~q).to_q_node())
 
-        for key, val in kwargs.items():
-            field, lookup = _parse_lookup_key(key)
-            builder = builder.add_filter(field, lookup, val, negated=True)
+        if kwargs:
+            batch = []
+            for key, val in kwargs.items():
+                field, lookup = _parse_lookup_key(key)
+                batch.append((field, lookup, val, True))
+            builder = builder.add_filters_batch(batch)
 
         return self._clone(builder)
 
@@ -458,8 +463,8 @@ class QuerySet:
         """Override ordering. Pass ``"-field"`` for DESC, ``"field"`` for ASC."""
 
         builder = self._builder
-        for f in fields:
-            builder = builder.add_order_by(f)
+        if fields:
+            builder = builder.add_order_by_batch(list(fields))
         return self._clone(builder)
 
     def limit(self, n: int) -> "QuerySet":
@@ -723,7 +728,8 @@ class QuerySet:
     async def update(self, **kwargs: Any) -> int:
         """Bulk update. Fires pre_update / post_update signals."""
 
-        alias = self._resolve_db_alias("write")
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
 
         builder = self._builder
         if alias:
@@ -739,23 +745,6 @@ class QuerySet:
     async def bulk_delete(self) -> int:
         """Alias for delete()."""
         return await self.delete()
-
-    async def update(self, **kwargs: Any) -> int:
-        """Bulk update. Fires pre_update / post_update signals."""
-
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
-
-        builder = self._builder
-        if alias:
-            builder = builder.set_using(alias)
-
-        await pre_update.send(sender=self._model, queryset=self, fields=kwargs)
-        n = await builder.execute_update(list(kwargs.items()))
-        await post_update.send(
-            sender=self._model, queryset=self, updated_count=n, fields=kwargs
-        )
-        return n
 
     async def in_bulk(self, id_list: list, *, field_name: str = "pk") -> dict:
         """Return a dict of {pk: instance} for the given list of PKs."""

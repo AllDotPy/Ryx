@@ -16,6 +16,7 @@ use crate::errors::{QueryError, QueryResult};
 use crate::lookups::date_lookups as date;
 use crate::lookups::json_lookups as json;
 use crate::lookups::{self, LookupContext};
+use smallvec::SmallVec;
 
 pub use super::helpers::{apply_like_wrapping, qualified_col, split_qualified, KNOWN_TRANSFORMS};
 
@@ -24,12 +25,12 @@ use super::helpers;
 #[derive(Debug, Clone)]
 pub struct CompiledQuery {
     pub sql: String,
-    pub values: Vec<SqlValue>,
+    pub values: SmallVec<[SqlValue; 8]>,
     pub db_alias: Option<String>,
 }
 
 pub fn compile(node: &QueryNode) -> QueryResult<CompiledQuery> {
-    let mut values: Vec<SqlValue> = Vec::new();
+    let mut values: SmallVec<[SqlValue; 8]> = SmallVec::new();
     let sql = match &node.operation {
         QueryOperation::Select { columns } => {
             compile_select(node, columns.as_deref(), &mut values)?
@@ -53,7 +54,7 @@ pub fn compile(node: &QueryNode) -> QueryResult<CompiledQuery> {
 fn compile_select(
     node: &QueryNode,
     columns: Option<&[String]>,
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
 ) -> QueryResult<String> {
     let base_cols = match columns {
         None => "*".to_string(),
@@ -134,7 +135,7 @@ fn compile_select(
     Ok(sql)
 }
 
-fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
+fn compile_aggregate(node: &QueryNode, values: &mut SmallVec<[SqlValue; 8]>) -> QueryResult<String> {
     if node.annotations.is_empty() {
         return Err(QueryError::Internal(
             "aggregate() called with no aggregate expressions".into(),
@@ -158,7 +159,7 @@ fn compile_aggregate(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResul
     Ok(sql)
 }
 
-fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
+fn compile_count(node: &QueryNode, values: &mut SmallVec<[SqlValue; 8]>) -> QueryResult<String> {
     let mut sql = format!("SELECT COUNT(*) FROM {}", helpers::quote_col(&node.table));
     if !node.joins.is_empty() {
         sql.push(' ');
@@ -173,7 +174,7 @@ fn compile_count(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<St
     Ok(sql)
 }
 
-fn compile_delete(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<String> {
+fn compile_delete(node: &QueryNode, values: &mut SmallVec<[SqlValue; 8]>) -> QueryResult<String> {
     let mut sql = format!("DELETE FROM {}", helpers::quote_col(&node.table));
     let where_sql =
         compile_where_combined(&node.filters, node.q_filter.as_ref(), values, node.backend)?;
@@ -187,7 +188,7 @@ fn compile_delete(node: &QueryNode, values: &mut Vec<SqlValue>) -> QueryResult<S
 fn compile_update(
     node: &QueryNode,
     assignments: &[(String, SqlValue)],
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
 ) -> QueryResult<String> {
     if assignments.is_empty() {
         return Err(QueryError::Internal("UPDATE with no assignments".into()));
@@ -217,7 +218,7 @@ fn compile_insert(
     node: &QueryNode,
     cols_vals: &[(String, SqlValue)],
     returning_id: bool,
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
 ) -> QueryResult<String> {
     if cols_vals.is_empty() {
         return Err(QueryError::Internal("INSERT with no values".into()));
@@ -340,7 +341,7 @@ pub fn compile_order_by(clauses: &[crate::ast::OrderByClause]) -> String {
 fn compile_where_combined(
     filters: &[FilterNode],
     q: Option<&QNode>,
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
     backend: Backend,
 ) -> QueryResult<String> {
     let flat = if filters.is_empty() {
@@ -361,7 +362,11 @@ fn compile_where_combined(
     })
 }
 
-pub fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> QueryResult<String> {
+pub fn compile_q(
+    q: &QNode,
+    values: &mut SmallVec<[SqlValue; 8]>,
+    backend: Backend,
+) -> QueryResult<String> {
     match q {
         QNode::Leaf {
             field,
@@ -392,7 +397,7 @@ pub fn compile_q(q: &QNode, values: &mut Vec<SqlValue>, backend: Backend) -> Que
 
 fn compile_filters(
     filters: &[FilterNode],
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
     backend: Backend,
 ) -> QueryResult<String> {
     let parts: Vec<String> = filters
@@ -407,7 +412,7 @@ fn compile_single_filter(
     lookup: &str,
     value: &SqlValue,
     negated: bool,
-    values: &mut Vec<SqlValue>,
+    values: &mut SmallVec<[SqlValue; 8]>,
     backend: Backend,
 ) -> QueryResult<String> {
     let (base_column, applied_transforms, json_key) = if field.contains("__") {
@@ -474,9 +479,9 @@ fn compile_single_filter(
     }
 
     if lookup == "in" {
-        let items = match value {
-            SqlValue::List(v) => v.clone(),
-            other => vec![other.clone()],
+        let items: SmallVec<[SqlValue; 4]> = match value {
+            SqlValue::List(v) => v.iter().map(|x| (**x).clone()).collect(),
+            other => smallvec::smallvec![(*other).clone()],
         };
         if items.is_empty() {
             return Ok("(1 = 0)".into());
@@ -495,9 +500,9 @@ fn compile_single_filter(
     }
 
     if lookup == "has_any" || lookup == "has_all" {
-        let items = match value {
-            SqlValue::List(v) => v.clone(),
-            other => vec![other.clone()],
+        let items: SmallVec<[SqlValue; 4]> = match value {
+            SqlValue::List(v) => v.iter().map(|x| (**x).clone()).collect(),
+            other => smallvec::smallvec![(*other).clone()],
         };
         if items.is_empty() {
             return Ok("(1 = 0)".into());
@@ -537,7 +542,7 @@ fn compile_single_filter(
 
     if lookup == "range" {
         let (lo, hi) = match value {
-            SqlValue::List(v) if v.len() == 2 => (v[0].clone(), v[1].clone()),
+            SqlValue::List(v) if v.len() == 2 => (v[0].as_ref().clone(), v[1].as_ref().clone()),
             _ => return Err(QueryError::Internal("range needs exactly 2 values".into())),
         };
         values.push(lo);

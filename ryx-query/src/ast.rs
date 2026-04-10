@@ -32,7 +32,7 @@ pub enum SqlValue {
     Text(String),
     /// Used by `__in` and `__range` lookups. The compiler expands it into
     /// multiple bind placeholders.
-    List(Vec<SqlValue>),
+    List(smallvec::SmallVec<[Box<SqlValue>; 4]>),
 }
 
 impl SqlValue {

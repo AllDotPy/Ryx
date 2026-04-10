@@ -25,12 +25,12 @@ Design notes:
 
 from __future__ import annotations
 
-# import asyncio
-# import itertools
 from typing import List, Sequence, Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ryx.models import Model
+
+from ryx import ryx_core as _core
 
 
 def _detect_backend() -> str:
@@ -113,12 +113,20 @@ async def bulk_create(
 
     pk_field = model._meta.pk_field
 
-    # Process in batches
+    # Process in batches — all SQL and execution handled in Rust
     for batch in _chunked(instances, batch_size):
-        pks = await _insert_batch(model, batch, fields, col_names, ignore_conflicts)
-        # Assign returned PKs to instances
-        for inst, pk in zip(batch, pks):
-            object.__setattr__(inst, pk_field.attname, pk)
+        rows = [[f.to_db(getattr(inst, f.attname)) for f in fields] for inst in batch]
+        res = await _core.bulk_insert(
+            model._meta.table_name,
+            col_names,
+            rows,
+            True,  # returning_id
+            ignore_conflicts,
+        )
+        # On PostgreSQL/SQLite res is list of ids; on MySQL res is rows_affected
+        if pk_field and isinstance(res, list):
+            for inst, pk in zip(batch, res):
+                object.__setattr__(inst, pk_field.attname, pk)
 
     return list(instances)
 
@@ -255,11 +263,7 @@ async def bulk_update(
     }
     total = 0
 
-    from ryx import ryx_core as _core
-    from ryx.pool_ext import execute_with_params
-
     for batch in _chunked(instances, batch_size):
-        # Collect valid instances (with pk set)
         valid = [inst for inst in batch if inst.pk is not None]
         if not valid:
             continue
@@ -268,55 +272,27 @@ async def bulk_update(
         pk_col = pk_field.column
         table = model._meta.table_name
 
-        # Build CASE WHEN clauses.
-        # Strategy: inline integers directly in SQL (zero FFI cost),
-        # use ? placeholders only for non-integer values.
-        case_clauses = []
-        all_values = []
-
+        # Collect values per column in the order of pks
+        col_names: List[str] = []
+        field_values: List[List[object]] = []
         for fname in update_fields:
             if fname not in field_objs:
                 continue
             fobj = field_objs[fname]
-            col = fobj.column
-            case_parts = [f'"{col}" = CASE "{pk_col}"']
-            for inst in valid:
-                val = fobj.to_db(getattr(inst, fname))
-                if isinstance(val, int) and not isinstance(val, bool):
-                    # Inline integers — zero FFI overhead
-                    case_parts.append(f"WHEN {inst.pk} THEN {val}")
-                else:
-                    case_parts.append("WHEN ? THEN ?")
-                    all_values.append(inst.pk)
-                    all_values.append(val)
-            case_parts.append("END")
-            case_clauses.append(" ".join(case_parts))
+            col_names.append(fobj.column)
+            vals = [fobj.to_db(getattr(inst, fname)) for inst in valid]
+            field_values.append(vals)
 
-        if not case_clauses:
+        if not col_names:
             continue
 
-        # WHERE IN — inline integer PKs
-        pk_parts = []
-        for pk in pks:
-            if isinstance(pk, int):
-                pk_parts.append(str(pk))
-            else:
-                pk_parts.append("?")
-                all_values.append(pk)
-
-        sql = (
-            f'UPDATE "{table}" SET '
-            f"{', '.join(case_clauses)} "
-            f'WHERE "{pk_col}" IN ({", ".join(pk_parts)})'
+        result = await _core.bulk_update(
+            table,
+            pk_col,
+            list(zip(col_names,field_values)),
+            pks,
         )
-
-        if all_values:
-            await execute_with_params(sql, all_values)
-        else:
-            from ryx.executor_helpers import raw_execute
-
-            await raw_execute(sql)
-        total += len(valid)
+        total += result
 
     return total
 
