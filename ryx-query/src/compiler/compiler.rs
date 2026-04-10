@@ -479,9 +479,9 @@ fn compile_single_filter(
     }
 
     if lookup == "in" {
-        let items = match value {
-            SqlValue::List(v) => v.clone(),
-            other => vec![other.clone()],
+        let items: SmallVec<[SqlValue; 4]> = match value {
+            SqlValue::List(v) => v.iter().map(|x| (**x).clone()).collect(),
+            other => smallvec::smallvec![(*other).clone()],
         };
         if items.is_empty() {
             return Ok("(1 = 0)".into());
@@ -500,9 +500,9 @@ fn compile_single_filter(
     }
 
     if lookup == "has_any" || lookup == "has_all" {
-        let items = match value {
-            SqlValue::List(v) => v.clone(),
-            other => vec![other.clone()],
+        let items: SmallVec<[SqlValue; 4]> = match value {
+            SqlValue::List(v) => v.iter().map(|x| (**x).clone()).collect(),
+            other => smallvec::smallvec![(*other).clone()],
         };
         if items.is_empty() {
             return Ok("(1 = 0)".into());
@@ -542,7 +542,7 @@ fn compile_single_filter(
 
     if lookup == "range" {
         let (lo, hi) = match value {
-            SqlValue::List(v) if v.len() == 2 => (v[0].clone(), v[1].clone()),
+            SqlValue::List(v) if v.len() == 2 => (v[0].as_ref().clone(), v[1].as_ref().clone()),
             _ => return Err(QueryError::Internal("range needs exactly 2 values".into())),
         };
         values.push(lo);

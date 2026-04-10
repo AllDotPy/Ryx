@@ -440,15 +440,15 @@ fn py_to_sql_value(obj: &Bound<'_, PyAny>) -> PyResult<SqlValue> {
     if let Ok(list) = obj.cast::<PyList>() {
         let items = list
             .iter()
-            .map(|i| py_to_sql_value(&i))
-            .collect::<PyResult<_>>()?;
+            .map(|i| py_to_sql_value(&i).map(Box::new))
+            .collect::<PyResult<smallvec::SmallVec<[Box<SqlValue>; 4]>>>()?;
         return Ok(SqlValue::List(items));
     }
     if let Ok(tup) = obj.cast::<PyTuple>() {
         let items = tup
             .iter()
-            .map(|i| py_to_sql_value(&i))
-            .collect::<PyResult<_>>()?;
+            .map(|i| py_to_sql_value(&i).map(Box::new))
+            .collect::<PyResult<smallvec::SmallVec<[Box<SqlValue>; 4]>>>()?;
         return Ok(SqlValue::List(items));
     }
     Ok(SqlValue::Text(obj.str()?.to_str()?.to_string()))
