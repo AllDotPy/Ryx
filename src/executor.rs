@@ -285,6 +285,8 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
     })
 }
 
+
+/// Execute QueryNode
 #[instrument(skip(node))]
 pub async fn execute_compiled(node: QueryNode) -> RyxResult<MutationResult> {
     let compiled = ryx_query::compiler::compile(&node).map_err(RyxError::from)?;
@@ -292,7 +294,8 @@ pub async fn execute_compiled(node: QueryNode) -> RyxResult<MutationResult> {
 }
 
 /// Bulk insert rows in one shot.
-pub async fn bulk_insert_compiled(
+/// Bulk insert rows with values already mapped to SqlValue.
+pub async fn bulk_insert(
     table: String,
     columns: Vec<String>,
     rows: Vec<Vec<SqlValue>>,
@@ -335,7 +338,8 @@ pub async fn bulk_insert_compiled(
 }
 
 /// Bulk delete by PK list in one shot.
-pub async fn bulk_delete_compiled(
+/// Bulk delete by primary key values.
+pub async fn bulk_delete(
     table: String,
     pk_col: String,
     pks: Vec<SqlValue>,

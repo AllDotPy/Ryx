@@ -760,7 +760,7 @@ fn bulk_delete<'py>(
     let pk_values = py_int_list_to_sql_values(&pk_list)?;
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
-        let result = executor::bulk_delete_compiled(table, pk_col, pk_values, None)
+        let result = executor::bulk_delete(table, pk_col, pk_values, None)
             .await
             .map_err(PyErr::from)?;
         Python::attach(|py| {
