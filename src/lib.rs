@@ -888,8 +888,6 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(available_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(list_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
-    m.add_function(wrap_pyfunction!(list_lookups, m)?)?;
-    m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
     m.add_function(wrap_pyfunction!(is_connected, m)?)?;
     m.add_function(wrap_pyfunction!(pool_stats, m)?)?;
     m.add_function(wrap_pyfunction!(raw_fetch, m)?)?;

@@ -723,7 +723,8 @@ class QuerySet:
     async def update(self, **kwargs: Any) -> int:
         """Bulk update. Fires pre_update / post_update signals."""
 
-        alias = self._resolve_db_alias("write")
+        # Resolve database alias: .using() -> Meta.database -> default
+        alias = self._using or self._model._meta.database
 
         builder = self._builder
         if alias:
@@ -739,23 +740,6 @@ class QuerySet:
     async def bulk_delete(self) -> int:
         """Alias for delete()."""
         return await self.delete()
-
-    async def update(self, **kwargs: Any) -> int:
-        """Bulk update. Fires pre_update / post_update signals."""
-
-        # Resolve database alias: .using() -> Meta.database -> default
-        alias = self._using or self._model._meta.database
-
-        builder = self._builder
-        if alias:
-            builder = builder.set_using(alias)
-
-        await pre_update.send(sender=self._model, queryset=self, fields=kwargs)
-        n = await builder.execute_update(list(kwargs.items()))
-        await post_update.send(
-            sender=self._model, queryset=self, updated_count=n, fields=kwargs
-        )
-        return n
 
     async def in_bulk(self, id_list: list, *, field_name: str = "pk") -> dict:
         """Return a dict of {pk: instance} for the given list of PKs."""

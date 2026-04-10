@@ -167,9 +167,6 @@ class Manager:
     def contribute_to_class(self, model: type, name: str) -> None:
         self._model = model
 
-    def contribute_to_class(self, model: type, name: str) -> None:
-        self._model = model
-
     def get_queryset(self):
         from ryx.queryset import QuerySet
 
