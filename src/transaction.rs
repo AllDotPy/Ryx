@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
 use sqlx::{Any, Transaction};
-use tracing::{debug, instrument};
+use tracing::debug;
 
 use crate::errors::{RyxError, RyxResult};
 use crate::pool;

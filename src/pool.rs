@@ -27,7 +27,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock, RwLock};
  
-use serde::{Deserialize, Serialize};
 use sqlx::{
     AnyPool,
     any::{AnyPoolOptions, install_default_drivers},
@@ -227,4 +226,3 @@ pub fn stats(alias: Option<&str>) -> RyxResult<PoolStats> {
         idle: pool.num_idle() as u32,
     })
 }
-
