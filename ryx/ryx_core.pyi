@@ -137,6 +137,10 @@ def list_transforms() -> list[str]:
     """Return all registered transform names (built-in + custom)."""
     ...
 
+def list_aliases() -> list[str]:
+    """Return all configured databases aliases"""
+    ...
+
 
 def is_connected(alias: str = 'default') -> bool:
     """Return ``True`` if ``setup()`` has been called successfully.

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use pyo3::prelude::IntoPyObject;
-use pyo3::prelude::*;
+use pyo3::{IntoPyObjectExt, prelude::*};
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use serde_json::Value as JsonValue;
 use tokio::sync::Mutex as TokioMutex;
@@ -46,7 +46,7 @@ fn setup<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     let urls_py = urls.cast::<PyDict>()?;
     let mut database_urls = HashMap::new();
- 
+    
     for (key, value) in urls_py.iter() {
         let alias = key.cast::<PyString>()?.to_str()?.to_string();
         let url = value.cast::<PyString>()?.to_str()?.to_string();
@@ -86,6 +86,19 @@ fn list_transforms() -> Vec<&'static str> {
     lookups::all_transforms().to_vec()
 }
 
+
+#[pyfunction]
+fn list_aliases<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    let aliases = pool::list_aliases().map_err(PyErr::from)?;
+    Ok(aliases.into_py_any(py)?.into_bound(py))
+}
+
+#[pyfunction]
+fn get_backend(alias: Option<String>) -> PyResult<String> {
+    let backend = pool::get_backend(alias.as_deref())
+        .map_err(PyErr::from)?;
+    Ok(format!("{:?}", backend))
+}
 
 #[pyfunction]
 fn is_connected(_py: Python<'_>, alias: Option<String>) -> bool {
@@ -890,6 +903,8 @@ fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
     m.add_function(wrap_pyfunction!(list_lookups, m)?)?;
     m.add_function(wrap_pyfunction!(list_transforms, m)?)?;
+    m.add_function(wrap_pyfunction!(list_aliases,m)?)?;
+    m.add_function(wrap_pyfunction!(get_backend, m)?)?;
     m.add_function(wrap_pyfunction!(is_connected, m)?)?;
     m.add_function(wrap_pyfunction!(pool_stats, m)?)?;
     m.add_function(wrap_pyfunction!(raw_fetch, m)?)?;
