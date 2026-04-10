@@ -149,7 +149,7 @@ fn raw_execute<'py>(
 #[pyclass(from_py_object, name = "QueryBuilder")]
 #[derive(Clone)]
 pub struct PyQueryBuilder {
-    node: QueryNode,
+    node: Arc<QueryNode>,
 }
 
 #[pymethods]
@@ -160,13 +160,13 @@ impl PyQueryBuilder {
         let backend = pool::get_backend(None).unwrap_or(ryx_query::Backend::PostgreSQL);
         
         Ok(Self {
-            node: QueryNode::select(table).with_backend(backend),
+            node: Arc::new(QueryNode::select(table).with_backend(backend)),
         })
     }
  
     fn set_using(&self, alias: String) -> PyResult<PyQueryBuilder> {
         Ok(PyQueryBuilder {
-            node: self.node.clone().with_db_alias(alias),
+            node: Arc::new(self.node.as_ref().clone().with_db_alias(alias)),
         })
     }
 
@@ -179,19 +179,19 @@ impl PyQueryBuilder {
     ) -> PyResult<PyQueryBuilder> {
         let sql_value = py_to_sql_value(value)?;
         Ok(PyQueryBuilder {
-            node: self.node.clone().with_filter(FilterNode {
+            node: Arc::new(self.node.as_ref().clone().with_filter(FilterNode {
                 field,
                 lookup,
                 value: sql_value,
                 negated,
-            }),
+            })),
         })
     }
 
     fn add_q_node(&self, node: &Bound<'_, PyAny>) -> PyResult<PyQueryBuilder> {
         let q = py_dict_to_qnode(node)?;
         Ok(PyQueryBuilder {
-            node: self.node.clone().with_q(q),
+            node: Arc::new(self.node.as_ref().clone().with_q(q)),
         })
     }
 
@@ -211,18 +211,18 @@ impl PyQueryBuilder {
             other => AggFunc::Raw(other.to_string()),
         };
         PyQueryBuilder {
-            node: self.node.clone().with_annotation(AggregateExpr {
+            node: Arc::new(self.node.as_ref().clone().with_annotation(AggregateExpr {
                 alias,
                 func: agg_func,
                 field,
                 distinct,
-            }),
+            })),
         }
     }
 
     fn add_group_by(&self, field: String) -> PyQueryBuilder {
         PyQueryBuilder {
-            node: self.node.clone().with_group_by(field),
+            node: Arc::new(self.node.as_ref().clone().with_group_by(field)),
         }
     }
 
@@ -243,41 +243,43 @@ impl PyQueryBuilder {
         };
         let alias_opt = if alias.is_empty() { None } else { Some(alias) };
         PyQueryBuilder {
-            node: self.node.clone().with_join(JoinClause {
+            node: Arc::new(self.node.as_ref().clone().with_join(JoinClause {
                 kind: join_kind,
                 table,
                 alias: alias_opt,
                 on_left,
                 on_right,
-            }),
+            })),
         }
     }
 
     fn add_order_by(&self, field: String) -> PyQueryBuilder {
         PyQueryBuilder {
-            node: self
-                .node
-                .clone()
-                .with_order_by(OrderByClause::parse(&field)),
+            node: Arc::new(
+                self.node
+                    .as_ref()
+                    .clone()
+                    .with_order_by(OrderByClause::parse(&field)),
+            ),
         }
     }
 
     fn set_limit(&self, n: u64) -> PyQueryBuilder {
         PyQueryBuilder {
-            node: self.node.clone().with_limit(n),
+            node: Arc::new(self.node.as_ref().clone().with_limit(n)),
         }
     }
 
     fn set_offset(&self, n: u64) -> PyQueryBuilder {
         PyQueryBuilder {
-            node: self.node.clone().with_offset(n),
+            node: Arc::new(self.node.as_ref().clone().with_offset(n)),
         }
     }
 
     fn set_distinct(&self) -> PyQueryBuilder {
-        let mut node = self.node.clone();
+        let mut node = self.node.as_ref().clone();
         node.distinct = true;
-        PyQueryBuilder { node }
+        PyQueryBuilder { node: Arc::new(node) }
     }
 
     // # Execution methods
@@ -291,7 +293,7 @@ impl PyQueryBuilder {
     }
 
     fn fetch_first<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let node = self.node.clone().with_limit(1);
+        let node = self.node.as_ref().clone().with_limit(1);
         let compiled = compiler::compile(&node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let rows = executor::fetch_all(compiled).await.map_err(PyErr::from)?;
@@ -311,7 +313,7 @@ impl PyQueryBuilder {
     }
 
     fn fetch_count<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let mut count_node = self.node.clone();
+        let mut count_node = self.node.as_ref().clone();
         count_node.operation = QueryOperation::Count;
         let compiled = compiler::compile(&count_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -321,7 +323,7 @@ impl PyQueryBuilder {
     }
 
     fn fetch_aggregate<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let mut agg_node = self.node.clone();
+        let mut agg_node = self.node.as_ref().clone();
         agg_node.operation = QueryOperation::Aggregate;
         let compiled = compiler::compile(&agg_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -334,7 +336,7 @@ impl PyQueryBuilder {
     }
 
     fn execute_delete<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-        let mut del_node = self.node.clone();
+        let mut del_node = self.node.as_ref().clone();
         del_node.operation = QueryOperation::Delete;
         let compiled = compiler::compile(&del_node).map_err(RyxError::from)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -353,7 +355,7 @@ impl PyQueryBuilder {
             .map(|(col, val)| Ok::<_, PyErr>((col, py_to_sql_value(&val)?)))
             .collect::<Result<_, _>>()?;
 
-        let mut upd_node = self.node.clone();
+        let mut upd_node = self.node.as_ref().clone();
         upd_node.operation = QueryOperation::Update {
             assignments: rust_assignments,
         };
@@ -376,7 +378,7 @@ impl PyQueryBuilder {
             .map(|(col, val)| Ok::<_, PyErr>((col, py_to_sql_value(&val)?)))
             .collect::<Result<_, _>>()?;
 
-        let mut ins_node = self.node.clone();
+        let mut ins_node = self.node.as_ref().clone();
         ins_node.operation = QueryOperation::Insert {
             values: rust_values,
             returning_id,
