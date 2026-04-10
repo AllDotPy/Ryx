@@ -96,7 +96,7 @@ pub async fn fetch_all(query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
  
     let rows = q.fetch_all(&*pool).await.map_err(RyxError::Database)?;
  
-    let decoded = rows.iter().map(decode_row).collect();
+    let decoded = decode_rows(&rows);
     Ok(decoded)
 }
  
@@ -183,7 +183,7 @@ pub async fn fetch_one(query: CompiledQuery) -> RyxResult<DecodedRow> {
  
         match rows.len() {
             0 => Err(RyxError::DoesNotExist),
-            1 => Ok(decode_row(&rows[0])),
+            1 => Ok(decode_row(&rows[0], None)),
             _ => Err(RyxError::MultipleObjectsReturned),
         }
     }
@@ -235,11 +235,11 @@ pub async fn execute(query: CompiledQuery) -> RyxResult<MutationResult> {
     if query.sql.to_uppercase().contains("RETURNING") {
         let mut q = sqlx::query(&query.sql);
         q = bind_values(q, &query.values);
- 
+
         let rows = q.fetch_all(&*pool).await.map_err(RyxError::Database)?;
- 
+
         let last_insert_id = rows.first().and_then(|row| row.try_get::<i64, _>(0).ok());
- 
+
         return Ok(MutationResult {
             rows_affected: rows.len() as u64,
             last_insert_id,
@@ -291,31 +291,32 @@ fn bind_values<'q>(
     q
 }
 
-/// Decode a single `AnyRow` into a `DecodedRow` (HashMap<String, JsonValue>).
-///
-/// We iterate over the columns and use sqlx's `try_get` to extract each value.
-/// The `Any` database driver supports a limited set of types natively:
-///   - i64 (maps to Bool and Int as well)
-///   - f64
-///   - String
-///   - Vec<u8> (bytes)
-///   - bool
-///
-/// Decode an AnyRow into a HashMap<String, JsonValue>.
-///
-/// We try each type in order and fall back to String if nothing else works.
-///
-/// Boolean detection on SQLite uses a zero-allocation case-insensitive check
-/// on the column name (no `to_lowercase()` allocation).
-fn decode_row(row: &AnyRow) -> DecodedRow {
-    let mut map = HashMap::new();
+/// Decode all rows with a precomputed column-name vector to reduce per-row allocations.
+fn decode_rows(rows: &[AnyRow]) -> Vec<DecodedRow> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
 
-    for column in row.columns() {
-        let name = column.name().to_string();
+    let col_names: Vec<String> = rows[0]
+        .columns()
+        .iter()
+        .map(|c| c.name().to_string())
+        .collect();
 
-        // Try to extract values in type priority order.
+    rows.iter()
+        .map(|row| decode_row(row, Some(&col_names)))
+        .collect()
+}
+
+fn decode_row(row: &AnyRow, names: Option<&Vec<String>>) -> DecodedRow {
+    let mut map = HashMap::with_capacity(row.columns().len());
+
+    for (idx, column) in row.columns().iter().enumerate() {
+        let name = names
+            .and_then(|n| n.get(idx).cloned())
+            .unwrap_or_else(|| column.name().to_string());
+
         let value = if let Ok(i) = row.try_get::<i64, _>(column.ordinal()) {
-            // Detect bool stored as int (SQLite/common patterns)
             let looks_bool = name.starts_with("is_")
                 || name.starts_with("Is_")
                 || name.starts_with("IS_")
@@ -329,18 +330,18 @@ fn decode_row(row: &AnyRow) -> DecodedRow {
                 || name.ends_with("_Flag")
                 || name.ends_with("_FLAG");
             if looks_bool && (i == 0 || i == 1) {
-                ryx_query::ast::SqlValue::Bool(i != 0)
+                SqlValue::Bool(i != 0)
             } else {
-                ryx_query::ast::SqlValue::Int(i)
+                SqlValue::Int(i)
             }
         } else if let Ok(b) = row.try_get::<bool, _>(column.ordinal()) {
-            ryx_query::ast::SqlValue::Bool(b)
+            SqlValue::Bool(b)
         } else if let Ok(f) = row.try_get::<f64, _>(column.ordinal()) {
-            ryx_query::ast::SqlValue::Float(f)
+            SqlValue::Float(f)
         } else if let Ok(s) = row.try_get::<String, _>(column.ordinal()) {
-            ryx_query::ast::SqlValue::Text(s)
+            SqlValue::Text(s)
         } else {
-            ryx_query::ast::SqlValue::Null
+            SqlValue::Null
         };
 
         map.insert(name, value);
