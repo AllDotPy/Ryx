@@ -126,8 +126,36 @@ shell.interact()
 
     async def _eval_query(self, query: str, ns: dict):
         """Eval the query in the context of the shell namespace."""
-        code = compile(query, "<query>", "eval")
-        return eval(code, ns)
+        import ast
+        import shlex
+        # Safely parse and evaluate literal expressions only
+        try:
+            # First try literal_eval for simple literals
+            if query.strip():
+                try:
+                    import ast
+                    node = ast.parse(query, mode='eval')
+                    # Only allow safe nodes: expressions, binop, unaryop, compare, calls to safe funcs
+                    allowed = (ast.Expression, ast.BinOp, ast.UnaryOp, ast.Compare,
+                               ast.Name, ast.NameConstant, ast.Num, ast.Str, ast.Bytes,
+                               ast.Tuple, ast.List, ast.Dict, ast.Call)
+                    for n in ast.walk(node):
+                        if not isinstance(n, allowed) and not isinstance(n, ast.expr_context):
+                            raise ValueError("Expression contains disallowed constructs")
+                    code = compile(node, "<query>", "eval")
+                    # Use restricted namespace without dangerous builtins
+                    safe_ns = {k: v for k, v in ns.items() if k != "__builtins__"}
+                    safe_ns["__builtins__"] = {}
+                    return eval(code, safe_ns)
+                except (SyntaxError, ValueError):
+                    pass
+            # Fallback: compile only
+            code = compile(query, "<query>", "eval")
+            safe_ns = {k: v for k, v in ns.items() if k != "__builtins__"}
+            safe_ns["__builtins__"] = {}
+            return eval(code, safe_ns)
+        except Exception:
+            return None
 
     def _resolve_url(self, args, config) -> str:
         url = getattr(args, "url", None)
