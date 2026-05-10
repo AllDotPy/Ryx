@@ -94,21 +94,7 @@ impl MySqlBackend {
 
     /// Rewrite generic `?` placeholders to PostgreSQL-style `$1, $2, ...` when needed.
     pub fn normalize_sql(&self, query: &CompiledQuery) -> String {
-        // Fast path: rewrite ? -> $n and append type casts when we know the
-        // column -> field type mapping.
-        let mut out = String::with_capacity(query.sql.len() + 8);
-        let mut idx = 0usize;
-
-        for ch in query.sql.chars() {
-            if ch == '?' {
-                idx += 1;
-                out.push('$');
-                out.push_str(&idx.to_string());
-            } else {
-                out.push(ch);
-            }
-        }
-        out
+        query.sql.clone() // MySQL uses `?` placeholders, so no normalization needed
     }
 }
 

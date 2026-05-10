@@ -608,6 +608,7 @@ class Model(metaclass=ModelMetaclass):
             values = [
                 (f.column, f.to_db(getattr(self, f.attname))) for f in fields_to_save
             ]
+            
             builder = _core.QueryBuilder(self._meta.table_name)
             if alias:
                 builder = builder.set_using(alias)
@@ -696,6 +697,7 @@ class Model(metaclass=ModelMetaclass):
         """
         if self.pk is None:
             raise RuntimeError("Cannot refresh an unsaved instance.")
+        
         fresh = await type(self).objects.get(pk=self.pk)
         reload_fields = fields or list(self._meta.fields.keys())
         for fname in reload_fields:

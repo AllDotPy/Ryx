@@ -14,6 +14,12 @@ pub struct Interner {
     vec: RwLock<Vec<String>>,
 }
 
+impl Default for Interner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Interner {
     pub fn new() -> Self {
         Self {

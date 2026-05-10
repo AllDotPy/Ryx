@@ -282,7 +282,7 @@ class QuerySet:
         new_ops.append((tag, payload))
         return self._clone(_ops=new_ops)
 
-    def _materialize_builder(self, alias: Optional[str]):
+    def _materialize_builder(self, alias: Optional[str]) -> _core.QueryBuilder:
         ops = list(self._ops)
         if alias:
             ops.append(("using", alias))
@@ -984,7 +984,7 @@ def _parse_lookup_key(key: str):
     return key, "exact"
 
 
-def _apply_q_node(builder, node: dict):
+def _apply_q_node(builder: _core.QueryBuilder, node: dict):
     """Recursively apply a Q node dict to the builder."""
     t = node.get("type", "leaf")
     if t == "leaf":

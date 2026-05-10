@@ -269,6 +269,8 @@ class Field:
 class AutoField(Field):
     """Auto-incrementing integer primary key. Added implicitly when no PK declared."""
 
+    SUPPORTED_LOOKUPS = ["exact", "gt", "gte", "lt", "lte", "in", "range", "isnull"]
+
     def __init__(self, **kw):
         kw.setdefault("primary_key", True)
         kw.setdefault("editable", False)

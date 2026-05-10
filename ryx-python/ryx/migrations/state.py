@@ -292,7 +292,7 @@ def project_state_from_models(models: list) -> SchemaState:
                 nullable = f.null,
                 primary_key = f.primary_key,
                 unique = f.unique or f.primary_key,
-                default = None,  # SQL defaults are handled by the runner
+                default = f.get_default(),
             )
             table.add_column(col)
         state.add_table(table)

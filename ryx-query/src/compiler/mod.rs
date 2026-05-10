@@ -10,17 +10,17 @@
 //   - helpers.rs  : Internal helper functions (quote_col, qualified_col, etc.)
 // ###
 
-pub mod compiler;
+pub mod compilr;
 pub mod helpers;
 
 // Re-export from compiler.rs
-pub use compiler::CompiledQuery;
-pub use compiler::SqlWriter;
-pub use compiler::compile;
-pub use compiler::compile_agg_cols;
-pub use compiler::compile_joins;
-pub use compiler::compile_order_by;
-pub use compiler::compile_q;
+pub use compilr::CompiledQuery;
+pub use compilr::SqlWriter;
+pub use compilr::compile;
+pub use compilr::compile_agg_cols;
+pub use compilr::compile_joins;
+pub use compilr::compile_order_by;
+pub use compilr::compile_q;
 
 // Re-export from helpers.rs
 pub use helpers::KNOWN_TRANSFORMS;

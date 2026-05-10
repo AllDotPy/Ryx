@@ -271,7 +271,7 @@ class DDLGenerator:
                 parts.append("UNIQUE")
             if col.default is not None:
                 parts.append(f"DEFAULT {col.default}")
-
+            
         return " ".join(parts)
 
     def _serial_type(self, db_type: str) -> str:
