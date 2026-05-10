@@ -7,104 +7,61 @@ sidebar_position: 3
 The compiled engine that powers Ryx. Built with PyO3, sqlx, and tokio.
 
 ## Module Overview
+ 
+ Ryx is organized as a Rust workspace to isolate concerns and optimize build times.
+ 
+ | Crate | Responsibility | Key Modules |
+ |---|---|---|
+ | **ryx-core** | Base types & Traits | `types.rs` (Connection/Transaction Enums) |
+ | **ryx-backend** | DB Adapters & Decoding | `backends/`, `utils.rs` (RowView logic) |
+ | **ryx-query** | SQL Compiler | `ast.rs`, `compiler.rs`, `lookup.rs` |
+ | **ryx-python** | PyO3 Bindings | `lib.rs` (Module entry, Type bridge) |
+ 
+ ## ryx-python — Module Entry
+ 
+ Exposes to Python:
+ 
+ - `PyQueryBuilder` — Python-facing query builder
+ - `setup_pool()` — Initialize the connection pool
+ - `pool_stats()` — Get pool statistics
+ - `begin_tx()`, `commit_tx()`, `rollback_tx()` — Transaction operations
+ - `savepoint()`, `rollback_to()`, `release_savepoint()` — Savepoint operations
+ - Type conversion: `py_to_sql_value()`, `json_to_py()`
+ 
+ ## ryx-core — Base Types
+ 
+ Defines the foundational enums that enable **Enum Dispatch**:
+ 
+ ```rust
+ pub enum RyxConnection {
+     Postgres(PgPool),
+     MySql(MySqlPool),
+     Sqlite(SqlitePool),
+ }
+ ```
+ 
+ This approach eliminates vtable overhead and allows the compiler to inline database-specific calls.
+ 
+ ## ryx-backend — Execution & Decoding
+ 
+ Handles the actual communication with the database and the high-performance row decoding system.
+ 
+ ```rust
+ // Optimized for zero-allocation
+ pub async fn fetch_all(query: CompiledQuery) -> Result<Vec<RowView>>
+ pub async fn fetch_count(query: CompiledQuery) -> Result<i64>
+ pub async fn fetch_one(query: CompiledQuery) -> Result<RowView>
+ pub async fn execute(query: CompiledQuery) -> Result<MutationResult>
+ ```
+ 
+ ## ryx-query — The Compiler
+ 
+ Transforms the `QueryNode` AST into optimized SQL strings and bound values.
+ 
+ ## Dependencies
+ 
+ | Crate | Version | Role |
 
-| Module | File | Responsibility |
-|---|---|---|
-| **lib.rs** | `src/lib.rs` | PyO3 entry, QueryBuilder, type bridges |
-| **errors.rs** | `src/errors.rs` | RyxError enum + PyErr conversion |
-| **pool.rs** | `src/pool.rs` | Global AnyPool singleton |
-| **executor.rs** | `src/executor.rs` | SQL execution + row decoding |
-| **transaction.rs** | `src/transaction.rs` | Transaction handle + savepoints |
-| **query/ast.rs** | `src/query/ast.rs` | Query AST types |
-| **query/compiler.rs** | `src/query/compiler.rs` | AST → SQL compilation |
-| **query/lookup.rs** | `src/query/lookup.rs` | Lookup registry |
-
-## lib.rs — Module Entry
-
-Exposes to Python:
-
-- `PyQueryBuilder` — Python-facing query builder
-- `setup_pool()` — Initialize the connection pool
-- `pool_stats()` — Get pool statistics
-- `begin_tx()`, `commit_tx()`, `rollback_tx()` — Transaction operations
-- `savepoint()`, `rollback_to()`, `release_savepoint()` — Savepoint operations
-- Type conversion: `py_to_sql_value()`, `json_to_py()`
-
-## errors.rs — Error System
-
-```rust
-#[derive(thiserror::Error, Debug)]
-pub enum RyxError {
-    #[error("Database error: {0}")]
-    Database(String),
-
-    #[error("Object does not exist")]
-    DoesNotExist,
-
-    #[error("Multiple objects returned")]
-    MultipleObjectsReturned,
-
-    #[error("Pool not initialized")]
-    PoolNotInitialized,
-
-    #[error("Pool already initialized")]
-    PoolAlreadyInitialized,
-
-    #[error("Unknown lookup: {0}")]
-    UnknownLookup(String),
-
-    #[error("Unknown field: {0}")]
-    UnknownField(String),
-
-    #[error("Type mismatch: {0}")]
-    TypeMismatch(String),
-
-    #[error("Internal error: {0}")]
-    Internal(String),
-}
-```
-
-Implements `From<RyxError> for PyErr` for automatic Python exception conversion.
-
-## pool.rs — Connection Pool
-
-```rust
-static POOL: OnceLock<AnyPool> = OnceLock::new();
-
-pub struct PoolConfig {
-    pub max_connections: u32,
-    pub min_connections: u32,
-    pub connect_timeout: Duration,
-    pub idle_timeout: Duration,
-    pub max_lifetime: Duration,
-}
-```
-
-Functions: `initialize()`, `get()`, `is_initialized()`, `stats()`.
-
-## executor.rs — SQL Execution
-
-```rust
-pub async fn fetch_all(query: CompiledQuery) -> Result<Vec<HashMap<String, JsonValue>>>
-pub async fn fetch_count(query: CompiledQuery) -> Result<i64>
-pub async fn fetch_one(query: CompiledQuery) -> Result<HashMap<String, JsonValue>>
-pub async fn execute(query: CompiledQuery) -> Result<MutationResult>
-```
-
-Transaction-aware: checks for active tx before using pool.
-
-## transaction.rs — Transaction Management
-
-```rust
-pub struct TransactionHandle {
-    tx: Transaction<Any>,
-    savepoints: Vec<String>,
-}
-```
-
-Global `ACTIVE_TX` OnceCell for context propagation.
-
-## Dependencies
 
 | Crate | Version | Role |
 |---|---|---|

@@ -1,0 +1,78 @@
+---
+sidebar_position: 4
+---
+
+# Performance Optimizations
+
+Ryx is engineered for extreme performance, with a primary target of **1-2 $\mu$s overhead** for query construction and row decoding. This is achieved by eliminating common abstractions that introduce runtime overhead.
+
+## 1. Enum Dispatch vs. Dynamic Dispatch
+
+In traditional Rust database wrappers, backend-specific logic is often handled via traits and `dyn` objects (dynamic dispatch). While flexible, this introduces **vtable lookups**, which prevent the compiler from inlining functions and add several nanoseconds to every call.
+
+Ryx replaces `dyn` traits with **Enum Dispatch**.
+
+### The Old Way (`dyn`)
+```rust
+trait Connection {
+    fn execute(&self, sql: &str) -> Result<...>;
+}
+
+struct RyxConnection {
+    inner: Box<dyn Connection>, // Vtable lookup on every call
+}
+```
+
+### The Ryx Way (Enums)
+```rust
+pub enum RyxConnection {
+    Postgres(PgPool),
+    MySql(MySqlPool),
+    Sqlite(SqlitePool),
+}
+
+impl RyxConnection {
+    pub fn execute(&self, sql: &str) -> Result<...> {
+        match self {
+            Self::Postgres(p) => p.execute(sql), // Compiler can inline this!
+            Self::MySql(m) => m.execute(sql),
+            Self::Sqlite(s) => s.execute(sql),
+        }
+    }
+}
+```
+By using enums, we move the dispatch decision to a simple branch that the CPU can predict perfectly, enabling the LLVM compiler to perform aggressive inlining and optimization.
+
+## 2. Zero-Allocation Row Decoding
+
+The most significant bottleneck in any ORM is transforming database rows into language-level objects. Most ORMs create a `HashMap` or a similar dictionary for every single row, leading to thousands of small allocations per query.
+
+Ryx implements a **Zero-Allocation Row System** using `RowView` and `RowMapping`.
+
+### The Strategy
+Instead of duplicating column names for every row, Ryx separates the **Structure** (mapping) from the **Data** (view).
+
+- **`RowMapping`**: Created once per query. It contains the column names and their indices in the result set.
+- **`RowView`**: Created for each row. It contains only the raw data pointers/values and a reference to the shared `RowMapping`.
+
+### Performance Impact
+| Approach | Allocations per Row | Memory Layout | Complexity |
+|---|---|---|---|
+| `HashMap` | $\sim$10-20 | Scattered | $O(\text{cols})$ |
+| **RowView** | **1 (The View itself)** | Linear / Contiguous | $O(1)$ |
+
+This reduces allocator pressure by orders of magnitude and significantly improves cache locality.
+
+## 3. GIL Minimization
+
+The Python Global Interpreter Lock (GIL) is the enemy of concurrency. Ryx ensures that the GIL is held for the absolute minimum amount of time.
+
+1. **Execution**: SQL is executed and results are fetched in Rust using `tokio` and `sqlx` without any Python objects involved.
+2. **Decoding**: Rows are decoded into `RowView` structures (pure Rust).
+3. **Bridging**: Only when the results are returned to Python are the `RowView` entries converted into `PyDict` objects.
+
+This means if a query takes 100ms to execute on the database, the GIL is **not held** for those 100ms, allowing other Python threads to continue running.
+
+## 4. PyO3 Bound Objects
+
+Ryx utilizes the latest PyO3 `Bound<'py, T>` API. By avoiding `Py<T>` (which uses reference counting) and using `Bound` (which uses direct pointers), we reduce the overhead of interacting with Python objects and eliminate unnecessary `inc_ref`/`dec_ref` calls.

@@ -95,7 +95,13 @@ async with ryx.transaction():
  
 Your Python queries are compiled to SQL in Rust, executed by sqlx, and decoded back — all without blocking the Python event loop.
 
-Since v0.1.3, the query engine has been extracted into a standalone crate `ryx-query`. This decouples the SQL compilation logic from the PyO3 bindings, enabling extreme performance and independent testing.
+To achieve near-native performance, Ryx uses a **multi-crate workspace architecture**:
+- `ryx-query`: A standalone, ultra-fast SQL compiler.
+- `ryx-backend`: High-performance database drivers using **Enum Dispatch** (no vtables) to eliminate runtime overhead.
+- `ryx-core`: Shared base types and the core ORM engine.
+- `ryx-python`: Optimized PyO3 bindings.
+
+**Key Performance Innovation**: Ryx uses a **Zero-Allocation Row View** system. Instead of creating a Python dictionary for every row, we use a shared column mapping and a flat value vector, drastically reducing heap allocations and GC pressure during large fetches.
  
 ## Performance
  

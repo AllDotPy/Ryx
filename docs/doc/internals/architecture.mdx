@@ -8,59 +8,72 @@ Ryx is built in three layers, each with a clear responsibility.
 
 ## Layer Diagram
  
-```
-┌──────────────────────────────────────────────────────────┐
-│  Python Layer  (ryx/)                                    │
-│  Model · QuerySet · Q · Fields · Validators · Signals    │
-│  Transactions · Relations · Migrations · CLI             │
-├──────────────────────────────────────────────────────────┤
-│  PyO3 Boundary  (src/lib.rs)                             │
-│  QueryBuilder · TransactionHandle · Type Bridge · Async  │
-├──────────────────────────────────────────────────────────┤
-│  Modular Query Engine (ryx-query crate)                  │
-│  AST · Q-Trees · SQL Compiler · Lookup Registry          │
-├──────────────────────────────────────────────────────────┤
-│  Rust Core (src/)                                        │
-│  Executor · Pool · Transaction Logic                     │
-├──────────────────────────────────────────────────────────┤
-│  sqlx 0.8.6  +  tokio 1.40                               │
-│  AnyPool · Async Drivers · Transactions                  │
-├──────────────────────────────────────────────────────────┤
-│  PostgreSQL · MySQL · SQLite                             │
-└──────────────────────────────────────────────────────────┘
-```
+ ```
+ ┌──────────────────────────────────────────────────────────┐
+ │  Python Layer  (ryx/)                                    │
+ │  Model · QuerySet · Q · Fields · Validators · Signals    │
+ │  Transactions · Relations · Migrations · CLI             │
+ ├──────────────────────────────────────────────────────────┤
+ │  PyO3 Boundary  (ryx-python crate)                       │
+ │  QueryBuilder · TransactionHandle · Type Bridge · Async  │
+ ├──────────────────────────────────────────────────────────┤
+ │  Modular Query Engine (ryx-query crate)                  │
+ │  AST · Q-Trees · SQL Compiler · Lookup Registry          │
+ ├──────────────────────────────────────────────────────────┤
+ │  Backend Logic (ryx-backend crate)                       │
+ │  Executor · RowView · Decoding Logic                     │
+ ├──────────────────────────────────────────────────────────┤
+ │  Core Types (ryx-core crate)                             │
+ │  Connection & Transaction Enums · Base Traits            │
+ ├──────────────────────────────────────────────────────────┤
+ │  sqlx 0.8.6  +  tokio 1.40                               │
+ │  AnyPool · Async Drivers · Transactions                  │
+ ├──────────────────────────────────────────────────────────┤
+ │  PostgreSQL · MySQL · SQLite                             │
+ └──────────────────────────────────────────────────────────┘
+ ```
+ 
+ 
+ ## Query Execution Flow
+ 
+ ```
+ Python: Post.objects.filter(active=True).order_by("-views").limit(10)
+     │
+     ▼
+ QuerySet builds QueryNode (immutable builder pattern)
+     │
+     ▼
+ PyQueryBuilder.fetch_all() — crosses PyO3 boundary (ryx-python)
+     │
+     ▼
+ compiler::compile(&QueryNode) → CompiledQuery { sql, values } (ryx-query)
+     │
+     ▼
+ executor::fetch_all(compiled) → sqlx::query(sql).bind(values).fetch_all(pool) (ryx-backend)
+     │
+     ▼
+ decode_rows(AnyRow) → Vec<RowView> (Zero-allocation) (ryx-backend)
+     │
+     ▼
+ RowView → PyDict (ryx-python)
+     │
+     ▼
+ Model._from_row(row) → List[Model]
+ ```
+ 
+ ## Key Design Decisions
+ 
+ ### Performance First
+ 
+ Ryx is designed for extreme throughput. It avoids expensive abstractions in the hot path:
+ - **Enum Dispatch**: Replaces `dyn` traits to eliminate vtable lookups and enable inlining.
+ - **Zero-Allocation Rows**: Replaces `HashMap` with `RowView` to reduce allocator pressure.
+ - **GIL Minimization**: Performs all DB operations and decoding in pure Rust.
+ 
+ For a detailed breakdown, see **[Performance Optimizations](./performance)**.
+ 
+ ### Immutable Builders
 
-
-## Query Execution Flow
-
-```
-Python: Post.objects.filter(active=True).order_by("-views").limit(10)
-    │
-    ▼
-QuerySet builds QueryNode (immutable builder pattern)
-    │
-    ▼
-PyQueryBuilder.fetch_all() — crosses PyO3 boundary
-    │
-    ▼
-compiler::compile(&QueryNode) → CompiledQuery { sql, values }
-    │
-    ▼
-executor::fetch_all(compiled) → sqlx::query(sql).bind(values).fetch_all(pool)
-    │
-    ▼
-decode_row(AnyRow) → HashMap<String, JsonValue>
-    │
-    ▼
-json_to_py() → PyDict
-    │
-    ▼
-Model._from_row(row) → List[Model]
-```
-
-## Key Design Decisions
-
-### Immutable Builders
 
 Both Python QuerySet and Rust QueryNode use immutable builders — every method returns a new instance:
 
