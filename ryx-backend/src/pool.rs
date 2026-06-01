@@ -35,7 +35,8 @@ use ryx_query::Backend;
 use crate::backends::{
     RyxBackend, mysql::MySqlBackend, postgres::PostgresBackend, sqlite::SqliteBackend,
 };
-use ryx_core::errors::{RyxError, RyxResult};
+use ryx_common::errors::{RyxError, RyxResult};
+pub use ryx_common::PoolConfig;
 
 fn to_static<T: sqlx::Database>(tx: sqlx::Transaction<'_, T>) -> sqlx::Transaction<'static, T> {
     // SAFETY: transactions are tied to the process-lifetime pool. Extending the
@@ -81,54 +82,6 @@ pub struct PoolRegistry {
 
 /// Global singleton for the pool registry.
 static REGISTRY: OnceLock<RwLock<PoolRegistry>> = OnceLock::new();
-
-// ###
-// Pool configuration options
-//
-// We expose a subset of sqlx's PoolOptions to Python so users can tune the
-// pool without having to write Rust. These map 1:1 to sqlx fields.
-// ###
-
-/// Configuration options for the connection pool.
-///
-/// Passed from Python to `initialize()`. All fields are optional — sane
-/// defaults are applied when fields are `None`.
-#[derive(Debug, Clone)]
-pub struct PoolConfig {
-    /// Maximum number of connections the pool will maintain.
-    /// Default: 10. Tune based on your database's `max_connections` setting.
-    pub max_connections: u32,
-
-    /// Minimum number of idle connections the pool will keep alive.
-    /// Default: 1. Setting this higher reduces connection establishment latency
-    /// at the cost of holding connections open.
-    pub min_connections: u32,
-
-    /// How long (in seconds) to wait for a connection before giving up.
-    /// Default: 30s. Raise this for slow networks or cold-start scenarios.
-    pub connect_timeout_secs: u64,
-
-    /// How long (in seconds) an idle connection is kept before being closed.
-    /// Default: 600s (10 min). Lower this if your database has a tight
-    /// `wait_timeout` setting (common with MySQL/MariaDB).
-    pub idle_timeout_secs: u64,
-
-    /// Maximum lifetime (in seconds) of any connection regardless of usage.
-    /// Default: 1800s (30 min). Protects against stale connections.
-    pub max_lifetime_secs: u64,
-}
-
-impl Default for PoolConfig {
-    fn default() -> Self {
-        Self {
-            max_connections: 10,
-            min_connections: 1,
-            connect_timeout_secs: 30,
-            idle_timeout_secs: 600,
-            max_lifetime_secs: 1800,
-        }
-    }
-}
 
 //
 // Public API
