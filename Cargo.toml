@@ -4,6 +4,9 @@ members = [
     "ryx-backend",
     "ryx-query",
     "ryx-python",
+    "ryx-common",
+    "ryx-macro",
+    "ryx-rs",
 ]
 
 resolver = "2"
@@ -71,16 +74,16 @@ thiserror = "2"
 # on Rust 1.70+, but once_cell has a slightly nicer API for our use case.
 once_cell = "1"
 
+# Config file parsing (optional, used by ryx-rs config module)
+toml = "0.8"
+serde_yaml = "0.9"
+
 # tracing: structured, async-aware logging. We instrument every SQL execution
 # so users can enable RUST_LOG=ryx=debug for full query visibility.
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 
-[workspace.dev-dependencies]
-# tokio test macro for async unit tests
-tokio = { version = "1.40", features = ["full", "test-util"] }
-criterion = { version = "0.5", features = ["async_tokio"] }
 
 
 #
