@@ -4,7 +4,7 @@ pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
 
-use ryx_core::errors::{RyxError, RyxResult};
+use ryx_common::errors::{RyxError, RyxResult};
 use ryx_query::{
     ast::{QueryNode, SqlValue},
     compiler::CompiledQuery,
@@ -156,7 +156,13 @@ fn bind_pg<'q>(
         SqlValue::Bool(b) => q.bind(*b),
         SqlValue::Int(i) => q.bind(*i),
         SqlValue::Float(f) => q.bind(*f),
-        SqlValue::Text(s) => q.bind(s.as_str()),
+        SqlValue::Text(s)
+        | SqlValue::Date(s)
+        | SqlValue::DateTime(s)
+        | SqlValue::Time(s)
+        | SqlValue::Uuid(s)
+        | SqlValue::Decimal(s)
+        | SqlValue::Json(s) => q.bind(s.as_str()),
         SqlValue::List(_) => q,
     }
 }
@@ -170,7 +176,13 @@ fn bind_mysql<'q>(
         SqlValue::Bool(b) => q.bind(*b),
         SqlValue::Int(i) => q.bind(*i),
         SqlValue::Float(f) => q.bind(*f),
-        SqlValue::Text(s) => q.bind(s.as_str()),
+        SqlValue::Text(s)
+        | SqlValue::Date(s)
+        | SqlValue::DateTime(s)
+        | SqlValue::Time(s)
+        | SqlValue::Uuid(s)
+        | SqlValue::Decimal(s)
+        | SqlValue::Json(s) => q.bind(s.as_str()),
         SqlValue::List(_) => q,
     }
 }
@@ -184,7 +196,13 @@ fn bind_sqlite<'q>(
         SqlValue::Bool(b) => q.bind(*b),
         SqlValue::Int(i) => q.bind(*i),
         SqlValue::Float(f) => q.bind(*f),
-        SqlValue::Text(s) => q.bind(s.as_str()),
+        SqlValue::Text(s)
+        | SqlValue::Date(s)
+        | SqlValue::DateTime(s)
+        | SqlValue::Time(s)
+        | SqlValue::Uuid(s)
+        | SqlValue::Decimal(s)
+        | SqlValue::Json(s) => q.bind(s.as_str()),
         SqlValue::List(_) => q,
     }
 }
