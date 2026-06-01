@@ -28,7 +28,7 @@ use once_cell::sync::OnceCell;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex;
 
-use ryx_core::errors::{RyxError, RyxResult};
+use ryx_common::errors::{RyxError, RyxResult};
 use ryx_query::compiler::CompiledQuery;
 
 use crate::backends::{RowView, RyxBackend, RyxTransaction};
