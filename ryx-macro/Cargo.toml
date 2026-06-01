@@ -1,0 +1,13 @@
+[package]
+name = "ryx-macro"
+version = "0.1.0"
+edition = "2024"
+description = "Derive macros for the Ryx ORM (Model, FromRow)"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
