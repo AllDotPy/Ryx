@@ -3,6 +3,7 @@ pub mod plan;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::IntoPyObject;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use pyo3::{IntoPyObjectExt, prelude::*};
@@ -13,11 +14,53 @@ use ryx_backend::{
     core::{RyxError, model_registry},
     pool::{self, PoolConfig},
     query::{
-        AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, OrderByClause, QNode, QueryNode,
-        QueryOperation, SqlValue, Symbol, compiler, lookups,
+        AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, OrderByClause, QNode, QueryError,
+        QueryNode, QueryOperation, SqlValue, Symbol, compiler, lookups,
     },
     transaction::{self, TransactionHandle},
 };
+
+/// Extension trait to convert `RyxResult<T>` into `PyResult<T>`.
+pub(crate) trait IntoPyResult<T> {
+    fn into_py(self) -> PyResult<T>;
+}
+
+impl<T> IntoPyResult<T> for Result<T, RyxError> {
+    fn into_py(self) -> PyResult<T> {
+        self.map_err(|e| {
+            match e {
+                RyxError::Query(qe) => match qe {
+                    QueryError::UnknownLookup { .. }
+                    | QueryError::UnknownField { .. }
+                    | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+                    QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
+                },
+                RyxError::DatabaseWithSql(sql, e) => {
+                    PyRuntimeError::new_err(format!("Database error: {e} (sql: {sql})"))
+                }
+                other => PyRuntimeError::new_err(other.to_string()),
+            }
+        })
+    }
+}
+
+/// Convert a `RyxError` into a Python exception.
+/// Used in place of `map_err(PyErr::from)` because the orphan rule
+/// prevents implementing `From<RyxError> for PyErr` externally.
+pub(crate) fn err_to_py(err: impl Into<RyxError>) -> PyErr {
+    match err.into() {
+        RyxError::Query(qe) => match qe {
+            QueryError::UnknownLookup { .. }
+            | QueryError::UnknownField { .. }
+            | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+            QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
+        },
+        RyxError::DatabaseWithSql(sql, e) => {
+            PyRuntimeError::new_err(format!("Database error: {e} (sql: {sql})"))
+        }
+        other => PyRuntimeError::new_err(other.to_string()),
+    }
+}
 
 // ###
 // Setup / pool functions
@@ -60,7 +103,7 @@ fn setup<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         pool::initialize(database_urls, config)
             .await
-            .map_err(PyErr::from)?;
+            .map_err(err_to_py)?;
         Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
     })
 }
@@ -68,15 +111,13 @@ fn setup<'py>(
 #[pyfunction]
 fn register_lookup(name: String, sql_template: String) -> PyResult<()> {
     lookups::register_custom(name, sql_template)
-        .map_err(RyxError::from)
-        .map_err(PyErr::from)
+        .map_err(err_to_py)
 }
 
 #[pyfunction]
 fn available_lookups() -> PyResult<Vec<String>> {
     lookups::registered_lookups()
-        .map_err(RyxError::from)
-        .map_err(PyErr::from)
+        .map_err(err_to_py)
 }
 
 #[pyfunction]
@@ -91,13 +132,13 @@ fn list_transforms() -> Vec<&'static str> {
 
 #[pyfunction]
 fn list_aliases<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    let aliases = pool::list_aliases().map_err(PyErr::from)?;
+    let aliases = pool::list_aliases().map_err(err_to_py)?;
     Ok(aliases.into_py_any(py)?.into_bound(py))
 }
 
 #[pyfunction]
 fn get_backend(alias: Option<String>) -> PyResult<String> {
-    let backend = pool::get_backend(alias.as_deref()).map_err(PyErr::from)?;
+    let backend = pool::get_backend(alias.as_deref()).map_err(err_to_py)?;
     Ok(format!("{}", backend.as_str()))
 }
 
@@ -109,7 +150,7 @@ fn is_connected(_py: Python<'_>, alias: Option<String>) -> bool {
 
 #[pyfunction]
 fn pool_stats<'py>(py: Python<'py>, alias: Option<String>) -> PyResult<Bound<'py, PyAny>> {
-    let stats = pool::stats(alias.as_deref()).map_err(PyErr::from)?;
+    let stats = pool::stats(alias.as_deref()).map_err(err_to_py)?;
     let dict = PyDict::new(py);
     dict.set_item("size", stats.size)?;
     dict.set_item("idle", stats.idle)?;
@@ -125,9 +166,9 @@ fn raw_fetch<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
 
-        let rows = b.fetch_raw(sql, alias).await.map_err(PyErr::from)?;
+        let rows = b.fetch_raw(sql, alias).await.map_err(err_to_py)?;
         Python::attach(|py| {
             let py_rows = decoded_rows_to_py(py, rows)?;
             Ok(py_rows.unbind())
@@ -144,9 +185,9 @@ fn raw_execute<'py>(
 ) -> PyResult<Bound<'py, PyAny>> {
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
 
-        b.execute_raw(sql, alias).await.map_err(PyErr::from)?;
+        b.execute_raw(sql, alias).await.map_err(err_to_py)?;
         Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
     })
 }
@@ -166,7 +207,7 @@ impl PyQueryBuilder {
     #[new]
     fn new(table: String) -> PyResult<Self> {
         // Get the backend from the pool at QueryBuilder creation time
-        let backend = pool::get_backend(None)?;
+        let backend = pool::get_backend(None).into_py()?;
 
         Ok(Self {
             node: Arc::new(QueryNode::select(table).with_backend(backend)),
@@ -342,9 +383,9 @@ impl PyQueryBuilder {
         let node = self.node.as_ref().clone();
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(node.db_alias.as_deref())?;
+        let b = pool::get(node.db_alias.as_deref()).into_py()?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let rows = b.fetch_all_compiled(node).await.map_err(PyErr::from)?;
+            let rows = b.fetch_all_compiled(node).await.map_err(err_to_py)?;
             Python::attach(|py| Ok(decoded_rows_to_py(py, rows)?.unbind()))
         })
     }
@@ -353,10 +394,10 @@ impl PyQueryBuilder {
         let node = self.node.as_ref().clone().with_limit(1);
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(node.db_alias.as_deref())?;
+        let b = pool::get(node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let rows = b.fetch_all_compiled(node).await.map_err(PyErr::from)?;
+            let rows = b.fetch_all_compiled(node).await.map_err(err_to_py)?;
             Python::attach(|py| match rows.into_iter().next() {
                 Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
                 None => Ok(py.None().into_pyobject(py)?.unbind()),
@@ -368,10 +409,10 @@ impl PyQueryBuilder {
         let node = self.node.as_ref().clone();
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(node.db_alias.as_deref())?;
+        let b = pool::get(node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let row = b.fetch_one_compiled(node).await.map_err(PyErr::from)?;
+            let row = b.fetch_one_compiled(node).await.map_err(err_to_py)?;
             Python::attach(|py| Ok(decoded_row_to_py(py, row)?.into_any().unbind()))
         })
     }
@@ -380,14 +421,14 @@ impl PyQueryBuilder {
         let mut count_node = self.node.as_ref().clone();
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(count_node.db_alias.as_deref())?;
+        let b = pool::get(count_node.db_alias.as_deref()).into_py()?;
 
         count_node.operation = QueryOperation::Count;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let count = b
                 .fetch_count_compiled(count_node)
                 .await
-                .map_err(PyErr::from)?;
+                .map_err(err_to_py)?;
             Python::attach(|py| Ok(count.into_pyobject(py)?.unbind()))
         })
     }
@@ -397,10 +438,10 @@ impl PyQueryBuilder {
         agg_node.operation = QueryOperation::Aggregate;
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(agg_node.db_alias.as_deref())?;
+        let b = pool::get(agg_node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let rows = b.fetch_all_compiled(agg_node).await.map_err(PyErr::from)?;
+            let rows = b.fetch_all_compiled(agg_node).await.map_err(err_to_py)?;
             Python::attach(|py| match rows.into_iter().next() {
                 Some(row) => Ok(decoded_row_to_py(py, row)?.into_any().unbind()),
                 None => Ok(PyDict::new(py).into_any().unbind()),
@@ -413,10 +454,10 @@ impl PyQueryBuilder {
         del_node.operation = QueryOperation::Delete;
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(del_node.db_alias.as_deref())?;
+        let b = pool::get(del_node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let res = b.execute_compiled(del_node).await.map_err(PyErr::from)?;
+            let res = b.execute_compiled(del_node).await.map_err(err_to_py)?;
             Python::attach(|py| Ok(res.rows_affected.into_pyobject(py)?.unbind()))
         })
     }
@@ -437,10 +478,10 @@ impl PyQueryBuilder {
         };
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(upd_node.db_alias.as_deref())?;
+        let b = pool::get(upd_node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let res = b.execute_compiled(upd_node).await.map_err(PyErr::from)?;
+            let res = b.execute_compiled(upd_node).await.map_err(err_to_py)?;
             Python::attach(|py| Ok(res.rows_affected.into_pyobject(py)?.unbind()))
         })
     }
@@ -463,10 +504,10 @@ impl PyQueryBuilder {
         };
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(ins_node.db_alias.as_deref())?;
+        let b = pool::get(ins_node.db_alias.as_deref()).into_py()?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let res = b.execute_compiled(ins_node).await.map_err(PyErr::from)?;
+            let res = b.execute_compiled(ins_node).await.map_err(err_to_py)?;
             Python::attach(|py| {
                 if let Some(ids) = res.returned_ids {
                     Ok(ids.into_pyobject(py)?.into_any().unbind())
@@ -480,7 +521,7 @@ impl PyQueryBuilder {
     }
 
     fn compiled_sql(&self) -> PyResult<String> {
-        Ok(compiler::compile(&self.node).map_err(RyxError::from)?.sql)
+        Ok(compiler::compile(&self.node).map_err(err_to_py)?.sql)
     }
 }
 
@@ -639,6 +680,12 @@ fn sql_to_py<'py>(py: Python<'py>, v: &SqlValue) -> PyResult<Py<PyAny>> {
         SqlValue::Int(i) => i.into_pyobject(py)?.into_any().unbind(),
         SqlValue::Float(f) => f.into_pyobject(py)?.into_any().unbind(),
         SqlValue::Text(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Date(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::DateTime(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Time(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Uuid(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Decimal(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Json(s) => s.into_pyobject(py)?.into_any().unbind(),
         SqlValue::List(items) => {
             let list = PyList::empty(py);
             for item in items {
@@ -674,7 +721,7 @@ impl PyTransactionHandle {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
             if let Some(tx) = g.as_ref() {
-                tx.commit().await.map_err(PyErr::from)?;
+                tx.commit().await.map_err(err_to_py)?;
             }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
@@ -685,7 +732,7 @@ impl PyTransactionHandle {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
             if let Some(tx) = g.as_ref() {
-                tx.rollback().await.map_err(PyErr::from)?;
+                tx.rollback().await.map_err(err_to_py)?;
             }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
@@ -696,7 +743,7 @@ impl PyTransactionHandle {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let mut g = h.lock().await;
             if let Some(tx) = g.as_mut() {
-                tx.savepoint(&name).await.map_err(PyErr::from)?;
+                tx.savepoint(&name).await.map_err(err_to_py)?;
             }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
@@ -707,7 +754,7 @@ impl PyTransactionHandle {
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             let g = h.lock().await;
             if let Some(tx) = g.as_ref() {
-                tx.rollback_to(&name).await.map_err(PyErr::from)?;
+                tx.rollback_to(&name).await.map_err(err_to_py)?;
             }
             Python::attach(|py| Ok(py.None().into_pyobject(py)?.unbind()))
         })
@@ -741,7 +788,7 @@ fn begin_transaction<'py>(
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         let handle = TransactionHandle::begin(alias_str)
             .await
-            .map_err(PyErr::from)?;
+            .map_err(err_to_py)?;
         Python::attach(|py| {
             let py_handle = PyTransactionHandle {
                 handle: Arc::new(TokioMutex::new(Some(handle))),
@@ -794,13 +841,13 @@ fn execute_with_params<'py>(
             db_alias: alias.clone(),
             base_table: None,
             column_names: None,
-            backend: pool::get_backend(alias.as_deref())?,
+            backend: pool::get_backend(alias.as_deref()).into_py()?,
         };
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
 
-        let result = b.execute(compiled).await.map_err(PyErr::from)?;
+        let result = b.execute(compiled).await.map_err(err_to_py)?;
         Python::attach(|py| Ok(result.rows_affected.into_pyobject(py)?.unbind()))
     })
 }
@@ -824,13 +871,13 @@ fn fetch_with_params<'py>(
             db_alias: alias.clone(),
             base_table: None,
             column_names: None,
-            backend: pool::get_backend(alias.as_deref())?,
+            backend: pool::get_backend(alias.as_deref()).into_py()?,
         };
 
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
 
-        let rows = b.fetch_all(compiled).await.map_err(PyErr::from)?;
+        let rows = b.fetch_all(compiled).await.map_err(err_to_py)?;
         Python::attach(|py| Ok(decoded_rows_to_py(py, rows)?.unbind()))
     })
 }
@@ -857,12 +904,12 @@ fn bulk_delete<'py>(
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
 
         let result = b
             .bulk_delete(table, pk_col, pk_values, alias)
             .await
-            .map_err(PyErr::from)?;
+            .map_err(err_to_py)?;
         Python::attach(|py| {
             let n = (result.rows_affected as i64).into_pyobject(py)?;
             Ok(n.unbind())
@@ -893,7 +940,7 @@ fn bulk_insert<'py>(
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
         let res = b
             .bulk_insert(
                 table,
@@ -904,7 +951,7 @@ fn bulk_insert<'py>(
                 alias,
             )
             .await
-            .map_err(PyErr::from)?;
+            .map_err(err_to_py)?;
         Python::attach(|py| {
             if let Some(ids) = res.returned_ids {
                 Ok(ids.into_pyobject(py)?.into_any().unbind())
@@ -949,11 +996,11 @@ fn bulk_update<'py>(
 
     pyo3_async_runtimes::tokio::future_into_py(py, async move {
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
-        let b = pool::get(alias.as_deref())?;
+        let b = pool::get(alias.as_deref()).into_py()?;
         let result = b
             .bulk_update(table, pk_col, columns, rust_field_values, pk_values, alias)
             .await
-            .map_err(PyErr::from)?;
+            .map_err(err_to_py)?;
         Python::attach(|py| {
             let n = (result.rows_affected as i64).into_pyobject(py)?;
             Ok(n.unbind())
