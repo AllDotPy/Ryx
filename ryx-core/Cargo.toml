@@ -33,51 +33,19 @@ sqlite = ["sqlx/sqlite"]
 all = ["postgres", "mysql", "sqlite"]
 
 [dependencies]
+ryx-common = { path = "../ryx-common" }
 ryx-query = { path = "../ryx-query" }
 
-# PyO3 
-# "extension-module" is required when building a cdylib for Python import.
-# Without it, PyO3 tries to link against libpython, which breaks on Linux/macOS
-# when Python dynamically loads the extension.
 pyo3 = { workspace = true }
-
-# Async bridge 
-# pyo3-async-runtimes is the maintained successor of the abandoned pyo3-asyncio.
-# The "tokio-runtime" feature wires Rust Futures into Python's asyncio event
-# loop via tokio — users simply `await` our ORM calls from Python.
 pyo3-async-runtimes = { workspace = true }
-
-# sqlx 
-# We use sqlx 0.8.x (stable). The "runtime-tokio" feature is mandatory since
-# we drive everything through tokio. "macros" enables the query!/query_as!
-# macros if needed later. "chrono" adds DateTime support.
 sqlx = { workspace = true }
-
-# Tokio
-# Full tokio runtime. "full" is fine for a library crate — callers can restrict
-# features if they need a lighter binary.
 tokio = { workspace = true }
 smallvec = { workspace = true }
 chrono = { workspace = true }
-
-# Serialization
-# serde + serde_json: used to pass structured data between Rust and Python
-# (row data, query parameters, etc.)
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# Utilities
-# thiserror: ergonomic error type derivation. We define a rich BityaError type
-# that converts cleanly into Python exceptions via PyO3's IntoPy trait.
 thiserror = { workspace = true }
-
-# once_cell: used to store the global tokio Runtime and the connection pool
-# as lazily-initialized singletons. Using std::sync::OnceLock would also work
-# on Rust 1.70+, but once_cell has a slightly nicer API for our use case.
 once_cell = { workspace = true }
-
-# tracing: structured, async-aware logging. We instrument every SQL execution
-# so users can enable RUST_LOG=ryx=debug for full query visibility.
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
