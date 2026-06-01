@@ -5,8 +5,9 @@ edition = "2024"
 description = "Core query backend engine for Ryx ORM"
 
 [dependencies]
-ryx-core = { path = "../ryx-core", version = "0.1.0" }
-ryx-query = { path = "../ryx-query", version = "0.1.0" }
+ryx-common = { path = "../ryx-common" }
+ryx-query = { path = "../ryx-query" }
+ryx-core = { path = "../ryx-core", optional = true }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -20,7 +21,12 @@ async-trait = "0.1"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
+tempfile = "3"
 
-# [[bench]]
-# name = "query_bench"
-# harness = false
+[[bench]]
+name = "backend_bench"
+harness = false
+
+[features]
+default = ["python"]
+python = ["dep:ryx-core"]
