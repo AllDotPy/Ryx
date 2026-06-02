@@ -300,6 +300,10 @@ pub struct QueryNode {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub distinct: bool,
+
+    /// Extra columns emitted in SELECT with `AS alias` (for JOIN aliasing).
+    /// Each entry is `(column_expr, alias)`.
+    pub extra_aliases: Vec<(Symbol, Symbol)>,
 }
 
 impl QueryNode {
@@ -320,6 +324,7 @@ impl QueryNode {
             limit: None,
             offset: None,
             distinct: false,
+            extra_aliases: Vec::new(),
         }
     }
 
@@ -403,6 +408,12 @@ impl QueryNode {
     #[must_use]
     pub fn with_db_alias(mut self, alias: String) -> Self {
         self.db_alias = Some(alias);
+        self
+    }
+
+    #[must_use]
+    pub fn with_extra_alias(mut self, column: impl Into<Symbol>, alias: impl Into<Symbol>) -> Self {
+        self.extra_aliases.push((column.into(), alias.into()));
         self
     }
 }
