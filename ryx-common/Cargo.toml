@@ -5,7 +5,7 @@ edition = "2024"
 description = "Shared types for Ryx ORM (no PyO3 dependency)"
 
 [dependencies]
-ryx-query = { path = "../ryx-query" }
+ryx-query = { path = "../ryx-query", version = "0.1" }
 sqlx = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
