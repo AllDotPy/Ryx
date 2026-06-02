@@ -80,6 +80,25 @@ class MyProjectRouter(BaseRouter):
 set_router(MyProjectRouter())
 ```
 
+## Utility Functions
+
+```python
+# List all configured database aliases
+aliases = ryx.list_aliases()
+# → ["default", "users", "logs"]
+
+# Check connection status
+is_up = ryx.is_connected("default")  # → bool
+
+# Get pool stats
+stats = ryx.pool_stats("default")
+# → {"size": 5, "idle": 3}
+
+# Detect backend type
+backend = ryx.get_backend("default")
+# → "postgres" | "mysql" | "sqlite"
+```
+
 ## Multi-Database Transactions
 
 Transactions in Ryx are tied to a specific database connection. To start a transaction on a non-default database, pass the `alias` to the `transaction()` context manager.
