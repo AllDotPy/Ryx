@@ -33,8 +33,8 @@ sqlite = ["sqlx/sqlite"]
 all = ["postgres", "mysql", "sqlite"]
 
 [dependencies]
-ryx-common = { path = "../ryx-common" }
-ryx-query = { path = "../ryx-query" }
+ryx-common = { path = "../ryx-common", version = "0.1" }
+ryx-query = { path = "../ryx-query", version = "0.1" }
 
 pyo3 = { workspace = true }
 pyo3-async-runtimes = { workspace = true }
