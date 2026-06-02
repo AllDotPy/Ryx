@@ -322,6 +322,16 @@ fn compile_select(
         }
     }
 
+    // Render extra aliases (for JOIN column aliasing in select_related)
+    if !node.extra_aliases.is_empty() {
+        for (col, alias) in &node.extra_aliases {
+            writer.write(", ");
+            writer.write_qualified_symbol(*col);
+            writer.write(" AS ");
+            writer.write_symbol(*alias);
+        }
+    }
+
     writer.write(" FROM ");
     writer.write_symbol(node.table);
 

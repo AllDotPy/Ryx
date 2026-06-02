@@ -1,0 +1,37 @@
+---
+sidebar_position: 14
+---
+
+# Caching
+
+Ryx includes an in-memory query cache.
+
+## Setup
+
+```rust
+use ryx_rs::cache::{MemoryCache, configure_cache};
+
+configure_cache(MemoryCache::new(1000));
+```
+
+Creates an LRU cache with 1000 entry capacity.
+
+## Cached Queries
+
+```rust
+let posts: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .cache(60, Some("active_posts"))  // TTL: 60 seconds, named key
+    .all().await?;
+```
+
+The `cache()` method takes:
+
+| Parameter | Description |
+|---|---|
+| TTL (seconds) | Time-to-live before the cache entry expires |
+| Key (optional) | Named key for manual invalidation |
+
+## Next Steps
+
+- **[Filtering](../querying/filtering)** — Query reference

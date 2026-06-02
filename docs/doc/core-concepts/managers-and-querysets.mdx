@@ -129,6 +129,14 @@ async for post in Post.objects.filter(active=True):
     print(post.title)
 ```
 
+### Streaming
+
+```python
+async for batch in Post.objects.filter(active=True).stream(chunk_size=100, keyset="id"):
+    for post in batch:
+        print(post.title)
+```
+
 ### Count & Exists
 
 ```python

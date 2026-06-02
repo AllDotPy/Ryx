@@ -1,0 +1,36 @@
+---
+sidebar_position: 13
+---
+
+# Transactions
+
+Ryx supports async transactions with explicit commit/rollback.
+
+## Basic Usage
+
+```rust
+use ryx_rs::transaction;
+
+transaction(|tx| async move {
+    Post::objects().filter("author", "bob").delete().await?;
+
+    Post::objects().create()
+        .set("title", "New Post")
+        .set("author_id", 1i64)
+        .save().await?;
+
+    tx.commit().await  // or tx.rollback()
+}).await?;
+```
+
+The closure receives a transaction handle. Operations auto-rollback if the closure returns an error.
+
+## Safety
+
+- The active transaction is propagated through the async call stack via context
+- Nested calls to `transaction()` are not supported — use a single transaction block
+- Always call `tx.commit()` or `tx.rollback()` explicitly
+
+## Next Steps
+
+- **[Caching](./caching)** — Query result caching

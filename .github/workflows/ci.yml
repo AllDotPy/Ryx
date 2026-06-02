@@ -92,7 +92,7 @@ jobs:
         run: uv run maturin develop --release
 
       - name: Run pytest
-        run: uv run pytest tests/ -v --tb=short
+        run: uv run pytest ryx-python/tests/ -v --tb=short
 
       - name: Run examples smoke test
         run: |

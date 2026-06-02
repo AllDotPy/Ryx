@@ -1,0 +1,52 @@
+---
+sidebar_position: 2
+---
+
+# Installation
+
+## Prerequisites
+
+- Rust 1.83+
+- A database: PostgreSQL, MySQL, or SQLite
+
+## Add Dependencies
+
+```toml
+[dependencies]
+ryx-rs = "0.1"
+ryx-macro = "0.1"
+tokio = { version = "1", features = ["full"] }
+```
+
+Or via cargo:
+
+```bash
+cargo add ryx-rs ryx-macro
+cargo add tokio --features full
+```
+
+## Database Backends
+
+Enable backends as Cargo features:
+
+```toml
+# All backends
+ryx-rs = { version = "0.1", features = ["postgres", "mysql", "sqlite"] }
+
+# Single backend
+ryx-rs = { version = "0.1", features = ["postgres"] }
+```
+
+The default includes **SQLite** only.
+
+## Verify
+
+```bash
+cargo check
+```
+
+You should see a successful build.
+
+## Next Steps
+
+- **[Quick Start](./quick-start)** — Your first query in 5 minutes

@@ -1,0 +1,24 @@
+---
+sidebar_position: 9
+---
+
+# Creating Records
+
+## Via QuerySet
+
+Use the `.create()` builder pattern:
+
+```rust
+let post = Post::objects().create()
+    .set("title", "Hello Ryx")
+    .set("slug", "hello-ryx")
+    .set("views", 42i64)
+    .set("active", true)
+    .save().await?;
+```
+
+Each `.set()` call assigns a column value. `.save()` executes the INSERT and returns the model instance.
+
+## Next Steps
+
+- **[Reading](../crud/reading)** — Retrieve records

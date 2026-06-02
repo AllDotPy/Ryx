@@ -616,7 +616,13 @@ fn bind_values<'q>(
             SqlValue::Bool(b) => q.bind(*b),
             SqlValue::Int(i) => q.bind(*i),
             SqlValue::Float(f) => q.bind(*f),
-            SqlValue::Text(s) => q.bind(s.as_str()),
+            SqlValue::Text(s)
+            | SqlValue::Date(s)
+            | SqlValue::DateTime(s)
+            | SqlValue::Time(s)
+            | SqlValue::Uuid(s)
+            | SqlValue::Decimal(s)
+            | SqlValue::Json(s) => q.bind(s.as_str()),
             // Lists should have been expanded by the compiler into individual
             // placeholders. If we encounter a List here it's a compiler bug.
             SqlValue::List(_) => {
@@ -779,7 +785,7 @@ fn decode_with_spec(
             .try_get::<i64, _>(ord)
             .map(SqlValue::Int)
             .unwrap_or(SqlValue::Null),
-        "FloatField" | "DecimalField" => row
+        "FloatField" => row
             .try_get::<f64, _>(ord)
             .map(SqlValue::Float)
             .unwrap_or_else(|_| {
@@ -787,17 +793,33 @@ fn decode_with_spec(
                     .map(SqlValue::Text)
                     .unwrap_or(SqlValue::Null)
             }),
-        "UUIDField" | "CharField" | "TextField" | "SlugField" | "EmailField" | "URLField" => row
+        "DecimalField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Decimal)
+            .unwrap_or(SqlValue::Null),
+        "UUIDField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Uuid)
+            .unwrap_or(SqlValue::Null),
+        "CharField" | "TextField" | "SlugField" | "EmailField" | "URLField" => row
             .try_get::<String, _>(ord)
             .map(SqlValue::Text)
             .unwrap_or(SqlValue::Null),
-        "DateTimeField" | "DateField" | "TimeField" => row
+        "DateTimeField" => row
             .try_get::<String, _>(ord)
-            .map(SqlValue::Text)
+            .map(SqlValue::DateTime)
+            .unwrap_or(SqlValue::Null),
+        "DateField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Date)
+            .unwrap_or(SqlValue::Null),
+        "TimeField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Time)
             .unwrap_or(SqlValue::Null),
         "JSONField" => row
             .try_get::<String, _>(ord)
-            .map(SqlValue::Text)
+            .map(SqlValue::Json)
             .unwrap_or(SqlValue::Null),
         _ => decode_heuristic(row, ord, &spec.name),
     }

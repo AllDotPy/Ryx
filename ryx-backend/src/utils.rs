@@ -1,9 +1,11 @@
 use sqlx::Column;
 
-use ryx_core::model_registry;
 use ryx_query::ast::SqlValue;
 
 use crate::backends::DecodedRow;
+
+#[cfg(feature = "python")]
+use ryx_core::model_registry;
 
 pub fn is_date(s: &str) -> bool {
     matches!(s.len(), 10) && s.chars().nth(4) == Some('-') && s.chars().nth(7) == Some('-')
@@ -54,10 +56,7 @@ where
 
     for (idx, name) in mapping.columns.iter().enumerate() {
         let ord = row.columns().get(idx).map(|c| c.ordinal()).unwrap_or(idx);
-        let value = match base_table.and_then(|t| model_registry::lookup_field(t, name)) {
-            Some(spec) => decode_with_spec(row, ord, &spec),
-            None => decode_heuristic(row, ord, name),
-        };
+        let value = lookup_with_spec(row, ord, name, base_table);
         values.push(value);
     }
 
@@ -67,6 +66,33 @@ where
     }
 }
 
+/// Try to decode a column using the Python field registry (if available),
+/// otherwise fall back to heuristic decoding.
+fn lookup_with_spec<T: sqlx::Row>(
+    row: &T,
+    ord: usize,
+    name: &str,
+    #[allow(unused)] base_table: Option<&str>,
+) -> SqlValue
+where
+    usize: sqlx::ColumnIndex<T>,
+    bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+{
+    #[cfg(feature = "python")]
+    {
+        if let Some(base_table) = base_table {
+            if let Some(spec) = model_registry::lookup_field(base_table, name) {
+                return decode_with_spec(row, ord, &spec);
+            }
+        }
+    }
+    decode_heuristic(row, ord, name)
+}
+
+#[cfg(feature = "python")]
 pub fn decode_with_spec<T: sqlx::Row>(
     row: &T,
     ord: usize,
@@ -90,7 +116,7 @@ where
             .try_get::<i64, _>(ord)
             .map(SqlValue::Int)
             .unwrap_or(SqlValue::Null),
-        "FloatField" | "DecimalField" => row
+        "FloatField" => row
             .try_get::<f64, _>(ord)
             .map(SqlValue::Float)
             .unwrap_or_else(|_| {
@@ -98,17 +124,33 @@ where
                     .map(SqlValue::Text)
                     .unwrap_or(SqlValue::Null)
             }),
-        "UUIDField" | "CharField" | "TextField" | "SlugField" | "EmailField" | "URLField" => row
+        "DecimalField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Decimal)
+            .unwrap_or(SqlValue::Null),
+        "UUIDField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Uuid)
+            .unwrap_or(SqlValue::Null),
+        "CharField" | "TextField" | "SlugField" | "EmailField" | "URLField" => row
             .try_get::<String, _>(ord)
             .map(SqlValue::Text)
             .unwrap_or(SqlValue::Null),
-        "DateTimeField" | "DateField" | "TimeField" => row
+        "DateTimeField" => row
             .try_get::<String, _>(ord)
-            .map(SqlValue::Text)
+            .map(SqlValue::DateTime)
+            .unwrap_or(SqlValue::Null),
+        "DateField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Date)
+            .unwrap_or(SqlValue::Null),
+        "TimeField" => row
+            .try_get::<String, _>(ord)
+            .map(SqlValue::Time)
             .unwrap_or(SqlValue::Null),
         "JSONField" => row
             .try_get::<String, _>(ord)
-            .map(SqlValue::Text)
+            .map(SqlValue::Json)
             .unwrap_or(SqlValue::Null),
         _ => decode_heuristic(row, ord, &spec.name),
     }

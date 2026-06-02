@@ -6,10 +6,10 @@ use sqlx::{
     postgres::{PgPool, PgPoolOptions},
 };
 
-use ryx_core::{
-    errors::{RyxError, RyxResult},
-    model_registry,
-};
+use ryx_common::errors::{RyxError, RyxResult};
+
+#[cfg(feature = "python")]
+use ryx_core::model_registry;
 use ryx_query::ast::{QueryNode, SqlValue};
 use ryx_query::compiler::{CompiledQuery, compile};
 
@@ -79,7 +79,13 @@ impl PostgresBackend {
                 SqlValue::Bool(b) => q.bind(*b),
                 SqlValue::Int(i) => q.bind(*i),
                 SqlValue::Float(f) => q.bind(*f),
-                SqlValue::Text(s) => q.bind(s.as_str()),
+                SqlValue::Text(s)
+                | SqlValue::Date(s)
+                | SqlValue::DateTime(s)
+                | SqlValue::Time(s)
+                | SqlValue::Uuid(s)
+                | SqlValue::Decimal(s)
+                | SqlValue::Json(s) => q.bind(s.as_str()),
                 // Lists should have been expanded by the compiler into individual
                 // placeholders. If we encounter a List here it's a compiler bug.
                 SqlValue::List(_) => {
@@ -129,18 +135,34 @@ impl PostgresBackend {
         // field in the registry to get an authoritative type.
         if let (Some(cols), Some(table)) = (&query.column_names, &query.base_table) {
             if idx < cols.len() {
-                if let Some(spec) = model_registry::lookup_field(table, &cols[idx]) {
-                    return self.postgres_cast_for_type(&spec.data_type);
+                if let Some(cast) = self.maybe_model_cast(table, &cols[idx]) {
+                    return Some(cast);
                 }
             }
         }
 
         // Fallback heuristic (for WHERE values) to avoid regressions.
         query.values.get(idx).and_then(|v| match v {
+            SqlValue::Date(_) => Some("::date"),
+            SqlValue::DateTime(_) => Some("::timestamp"),
             SqlValue::Text(s) if is_date(s) => Some("::date"),
             SqlValue::Text(s) if is_timestamp(s) => Some("::timestamp"),
             _ => None,
         })
+    }
+
+    /// Look up a field in the model registry and return its PG cast suffix.
+    /// Falls back to `None` when the Python model registry is not available.
+    #[inline]
+    fn maybe_model_cast(&self, table: &str, col: &str) -> Option<&'static str> {
+        #[cfg(feature = "python")]
+        {
+            if let Some(spec) = model_registry::lookup_field(table, col) {
+                return self.postgres_cast_for_type(&spec.data_type);
+            }
+        }
+        let _ = (table, col);
+        None
     }
 
     /// Map a Django-style field type string to a PostgreSQL cast suffix.
@@ -150,7 +172,7 @@ impl PostgresBackend {
             "DateTimeField" | "DateTimeTzField" | "DateTimeTZField" => Some("::timestamp"),
             "TimeField" => Some("::time"),
             "JSONField" => Some("::jsonb"),
-            // "UUIDField" => Some("::uuid"),
+            "UUIDField" => Some("::uuid"),
             "AutoField" | "BigAutoField" | "SmallAutoField" => Some("::serial"),
             _ => None,
         }
@@ -173,7 +195,7 @@ impl RyxBackend for PostgresBackend {
     /// Execute a compiled query and return all resulting rows as a vector of DecodedRow.
     /// Uses `sqlx::query` to prepare the query, binds parameters, and executes it against the pool.
     /// Usage:
-    /// ```
+    /// ```ignore
     /// let query = CompiledQuery {
     ///     sql: "SELECT id, name FROM users WHERE age > $1".to_string(),
     ///     values: vec![SqlValue::Int(30)],
@@ -197,7 +219,7 @@ impl RyxBackend for PostgresBackend {
     /// Execute a compiled query and return a single DecodedRow.
     /// Uses `sqlx::query` to prepare the query, binds parameters, and executes it against the pool.
     /// Usage:
-    /// ```
+    /// ```ignore
     /// let query = CompiledQuery {
     ///     sql: "SELECT id, name FROM users WHERE id = $1".to_string(),
     ///     values: vec![SqlValue::Int(42)],
@@ -222,7 +244,7 @@ impl RyxBackend for PostgresBackend {
     /// Execute a compiled mutation query (INSERT/UPDATE/DELETE) and return the number of affected rows.
     /// Uses `sqlx::query` to prepare the query, binds parameters, and executes it against the pool.
     /// Usage:
-    /// ```
+    /// ```ignore
     /// let query = CompiledQuery {
     ///     sql: "UPDATE users SET active = false WHERE last_login < $1".to_string(),
     ///     values: vec![SqlValue::Text("2024-01-01".to_string())],
@@ -256,7 +278,7 @@ impl RyxBackend for PostgresBackend {
     /// Execute a raw SQL query and return all resulting rows as a vector of DecodedRow.
     /// This is used for queries that bypass the compiler and are executed directly.
     /// Usage:
-    /// ```
+    /// ```ignore
     /// let sql = "SELECT id, name FROM users WHERE active = true".to_string();
     /// let rows = backend.fetch_raw(sql, None).await.unwrap();
     /// for row in rows {
@@ -278,7 +300,7 @@ impl RyxBackend for PostgresBackend {
     /// Execute a compiled query represented as a QueryNode and return all resulting rows as a vector of DecodedRow.
     /// This is a convenience method that compiles the QueryNode and then executes it using fetch_all.
     /// Usage:
-    /// ```
+    /// ```ignore
     /// let node = QueryNode::Select { ... }; // Construct a QueryNode representing the query
     /// let rows = backend.fetch_all_compiled(node).await.unwrap();
     /// for row in rows {
@@ -553,11 +575,7 @@ impl RyxBackend for PostgresBackend {
         // Build placeholders once with proper casting for PostgreSQL.
         let mut placeholders: Vec<String> = Vec::with_capacity(columns.len());
         for (idx, col) in columns.iter().enumerate() {
-            let cast = if let Some(spec) = model_registry::lookup_field(&table, col) {
-                self.postgres_cast_for_type(&spec.data_type)
-            } else {
-                None
-            };
+            let cast = self.maybe_model_cast(&table, col);
             let raw = format!("${}{}", idx + 1, cast.unwrap_or(""));
             placeholders.push(raw);
         }
@@ -648,8 +666,7 @@ impl RyxBackend for PostgresBackend {
             });
         }
 
-        let pk_cast = model_registry::lookup_field(&table, &pk_col)
-            .and_then(|s| self.postgres_cast_for_type(&s.data_type));
+        let pk_cast = self.maybe_model_cast(&table, &pk_col);
 
         let mut param_idx = 0usize;
         let ph = (0..pks.len())
@@ -704,14 +721,12 @@ impl RyxBackend for PostgresBackend {
 
         let mut case_clauses = Vec::with_capacity(f);
         let mut all_values: SmallVec<[SqlValue; 8]> = SmallVec::with_capacity(n * f * 2 + n);
-        let pk_cast = model_registry::lookup_field(&table, &pk_col)
-            .and_then(|s| self.postgres_cast_for_type(&s.data_type));
+        let pk_cast = self.maybe_model_cast(&table, &pk_col);
 
         // Build CASE clauses with placeholders.
         let mut param_idx: usize = 0;
         for (fi, col_name) in col_names.iter().enumerate() {
-            let value_cast = model_registry::lookup_field(&table, col_name)
-                .and_then(|s| self.postgres_cast_for_type(&s.data_type));
+            let value_cast = self.maybe_model_cast(&table, col_name);
 
             let mut case_parts = Vec::with_capacity(n * 3 + 2);
             case_parts.push(format!("\"{}\" = CASE \"{}\"", col_name, pk_col));

@@ -1,0 +1,50 @@
+---
+sidebar_position: 1
+slug: /rust
+---
+
+# Ryx for Rust
+
+Ryx is a Django-style ORM for Rust. Async-native, with zero Python dependencies.
+
+```rust
+use ryx_rs::model;
+
+#[model]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    views: i64,
+    active: bool,
+}
+
+let posts = Post::objects()
+    .filter("active", true)
+    .order_by("-views")
+    .all().await?;
+```
+
+## Crates
+
+| Crate | Description |
+|---|---|
+| [`ryx-rs`](https://crates.io/crates/ryx-rs) | Core ORM: models, QuerySet, migrations, caching |
+| [`ryx-macro`](https://crates.io/crates/ryx-macro) | Proc macros: `#[model]`, `#[field]`, `#[table]`, `#[relation]` |
+
+## Quick Comparison
+
+| Feature | Python (ryx) | Rust (ryx-rs) |
+|---|---|---|
+| Model definition | Class + Fields | `#[model]` struct |
+| QuerySet | `Post.objects` | `Post::objects()` |
+| Filtering | `.filter(active=True)` | `.filter("active", true)` |
+| Q objects | `Q(active=True) \| Q(...)` | `Q::or(Q::new(...), ...)` |
+| Create | `.create(title="...")` | `.create().set("title", "...").save()` |
+| Migrations | `MigrationRunner([Post])` | `MigrationRunner::new().model::<Post>()` |
+| Relations | `ForeignKey(Author)` | `#[relation(model = "Author", ...)]` |
+
+## Next Steps
+
+- **[Installation](./getting-started/installation)** — Add Ryx to your Cargo.toml
+- **[Quick Start](./getting-started/quick-start)** — Your first query in 5 minutes

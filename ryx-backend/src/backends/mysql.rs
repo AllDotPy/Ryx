@@ -6,7 +6,7 @@ use sqlx::{
     mysql::{MySqlPool, MySqlPoolOptions},
 };
 
-use ryx_core::errors::{RyxError, RyxResult};
+use ryx_common::errors::{RyxError, RyxResult};
 use ryx_query::ast::{QueryNode, SqlValue};
 use ryx_query::compiler::{CompiledQuery, compile};
 
@@ -76,7 +76,13 @@ impl MySqlBackend {
                 SqlValue::Bool(b) => q.bind(*b),
                 SqlValue::Int(i) => q.bind(*i),
                 SqlValue::Float(f) => q.bind(*f),
-                SqlValue::Text(s) => q.bind(s.as_str()),
+                SqlValue::Text(s)
+                | SqlValue::Date(s)
+                | SqlValue::DateTime(s)
+                | SqlValue::Time(s)
+                | SqlValue::Uuid(s)
+                | SqlValue::Decimal(s)
+                | SqlValue::Json(s) => q.bind(s.as_str()),
                 // Lists should have been expanded by the compiler into individual
                 // placeholders. If we encounter a List here it's a compiler bug.
                 SqlValue::List(_) => {
@@ -487,6 +493,9 @@ impl RyxBackend for MySqlBackend {
         for (idx, _col) in columns.iter().enumerate() {
             let raw = {
                 match rows.get(0).and_then(|r| r.get(idx)) {
+                    Some(SqlValue::Date(_)) => "CAST(? AS DATE)".to_string(),
+                    Some(SqlValue::DateTime(_)) => "CAST(? AS TIMESTAMP)".to_string(),
+                    Some(SqlValue::Time(_)) => "CAST(? AS TIME)".to_string(),
                     Some(SqlValue::Text(s)) if is_date(s) => "CAST(? AS DATE)".to_string(),
                     Some(SqlValue::Text(s)) if is_timestamp(s) => {
                         "CAST(? AS TIMESTAMP)".to_string()

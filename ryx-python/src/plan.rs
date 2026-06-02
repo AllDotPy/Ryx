@@ -34,7 +34,7 @@ pub fn build_plan<'py>(
     ops: Vec<Bound<'_, PyAny>>,
     alias: Option<String>,
 ) -> PyResult<crate::PyQueryBuilder> {
-    let backend = ryx_pool::get_backend(alias.as_deref())?;
+    let backend = ryx_pool::get_backend(alias.as_deref()).map_err(crate::err_to_py)?;
     let mut node = QueryNode::select(table).with_backend(backend);
     if let Some(a) = alias {
         node = node.with_db_alias(a);
@@ -170,7 +170,7 @@ pub fn build_plan<'py>(
             }
             "using" => {
                 let db_alias: String = tuple.get_item(1)?.extract()?;
-                let backend = ryx_pool::get_backend(Some(&db_alias))?;
+                let backend = ryx_pool::get_backend(Some(&db_alias)).map_err(crate::err_to_py)?;
                 node = node.with_backend(backend).with_db_alias(db_alias);
             }
             _ => {}

@@ -53,6 +53,13 @@ if await Post.objects.filter(active=True).exists():
 count = await Post.objects.filter(active=True).count()
 ```
 
+## Bulk Lookup
+
+```python
+posts = await Post.objects.in_bulk([1, 2, 3, 4, 5])
+# → {1: <Post pk=1>, 2: <Post pk=2>, ...}
+```
+
 ## Slicing
 
 ```python
@@ -75,12 +82,37 @@ async for post in Post.objects.filter(active=True):
 
 ## Streaming Large Results
 
+### Via bulk.stream
+
 ```python
 from ryx.bulk import stream
 
-async for batch in stream(Post.objects.filter(active=True), page_size=500):
+async for batch in stream(Post.objects.filter(active=True), chunk_size=500):
     for post in batch:
         process(post)
+```
+
+### Via QuerySet.stream
+
+```python
+# Keyset-based pagination (efficient for large datasets)
+async for batch in (
+    Post.objects
+        .filter(active=True)
+        .order_by("id")
+        .stream(chunk_size=100, keyset="id")
+):
+    for post in batch:
+        process(post)
+
+# As dicts instead of model instances
+async for batch in (
+    Post.objects
+        .filter(active=True)
+        .stream(chunk_size=100, as_dict=True)
+):
+    for row in batch:
+        print(row["title"])
 ```
 
 ## Next Steps

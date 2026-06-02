@@ -30,8 +30,20 @@ pub enum SqlValue {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// String, datetime, UUID, Decimal — all stored as text and parsed by the driver.
+    /// Generic string value (label, name, slug, etc.).
     Text(String),
+    /// ISO-8601 date (YYYY-MM-DD).
+    Date(String),
+    /// ISO-8601 datetime (YYYY-MM-DD HH:MM:SS).
+    DateTime(String),
+    /// ISO-8601 time (HH:MM:SS).
+    Time(String),
+    /// UUID as canonical text.
+    Uuid(String),
+    /// Decimal number as string (avoids f64 precision loss).
+    Decimal(String),
+    /// Raw JSON text.
+    Json(String),
     /// Used by `__in` and `__range` lookups. The compiler expands it into
     /// multiple bind placeholders.
     List(smallvec::SmallVec<[Box<SqlValue>; 4]>),
@@ -45,6 +57,12 @@ impl SqlValue {
             SqlValue::Int(_) => "int",
             SqlValue::Float(_) => "float",
             SqlValue::Text(_) => "str",
+            SqlValue::Date(_) => "date",
+            SqlValue::DateTime(_) => "datetime",
+            SqlValue::Time(_) => "time",
+            SqlValue::Uuid(_) => "uuid",
+            SqlValue::Decimal(_) => "decimal",
+            SqlValue::Json(_) => "json",
             SqlValue::List(_) => "list",
         }
     }
@@ -282,6 +300,10 @@ pub struct QueryNode {
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub distinct: bool,
+
+    /// Extra columns emitted in SELECT with `AS alias` (for JOIN aliasing).
+    /// Each entry is `(column_expr, alias)`.
+    pub extra_aliases: Vec<(Symbol, Symbol)>,
 }
 
 impl QueryNode {
@@ -302,6 +324,7 @@ impl QueryNode {
             limit: None,
             offset: None,
             distinct: false,
+            extra_aliases: Vec::new(),
         }
     }
 
@@ -385,6 +408,12 @@ impl QueryNode {
     #[must_use]
     pub fn with_db_alias(mut self, alias: String) -> Self {
         self.db_alias = Some(alias);
+        self
+    }
+
+    #[must_use]
+    pub fn with_extra_alias(mut self, column: impl Into<Symbol>, alias: impl Into<Symbol>) -> Self {
+        self.extra_aliases.push((column.into(), alias.into()));
         self
     }
 }

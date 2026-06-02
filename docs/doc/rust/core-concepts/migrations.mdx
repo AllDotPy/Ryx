@@ -1,0 +1,54 @@
+---
+sidebar_position: 6
+---
+
+# Migrations
+
+Ryx can detect your models and create database tables automatically.
+
+## Basic Usage
+
+```rust
+use ryx_rs::migration::MigrationRunner;
+
+MigrationRunner::new()
+    .model::<Author>()
+    .model::<Post>()
+    .run().await?;
+```
+
+This introspects your database, diffs against your model definitions, and generates the necessary DDL (CREATE TABLE, ALTER COLUMN, etc.).
+
+## How It Works
+
+```
+1. Introspect live DB schema   → SchemaState (current)
+2. Build target from models    → SchemaState (desired)
+3. Diff the two states         → List of changes
+4. Generate DDL                → CREATE / ALTER statements
+5. Execute                     → Apply to database
+```
+
+## What Migrations Handle
+
+- Creating and dropping tables
+- Adding, altering, and dropping columns
+- Creating and dropping indexes
+- Adding constraints
+- Creating ManyToMany join tables
+
+## Tracking
+
+Ryx creates a `ryx_migrations` table to track applied state.
+
+## Backend Differences
+
+| Feature | PostgreSQL | MySQL | SQLite |
+|---|---|---|---|
+| `ALTER COLUMN` | Yes | Yes | No (recreate) |
+| Native UUID | Yes | No | No |
+| `SERIAL` | Yes | No | No |
+
+## Next Steps
+
+- **[Querying](/rust/querying/filtering)** — Start querying your data

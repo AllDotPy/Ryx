@@ -1,7 +1,7 @@
-// Rexport core types for use in backends and pool management
-pub use ryx_core::{
+pub use ryx_common::{
     errors::{RyxError, RyxResult},
-    model_registry::{
-        self, PyFieldSpec, PyModelOptions, PyModelSpec, get_model_spec, register_model_spec,
-    },
+    model::{FieldMeta, ModelMeta},
 };
+
+#[cfg(feature = "python")]
+pub use ryx_core::model_registry::{self, PyFieldSpec, PyModelOptions, PyModelSpec};

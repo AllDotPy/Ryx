@@ -41,12 +41,28 @@ class Product(Model):
 | `MinValueValidator(n)` | Value ≥ n |
 | `RangeValidator(min, max)` | Value in range |
 | `NotBlankValidator()` | Not empty string |
+| `NotNullValidator()` | Not None |
 | `RegexValidator(pattern)` | Matches regex |
 | `EmailValidator()` | Valid email format |
 | `URLValidator()` | Valid URL format |
 | `ChoicesValidator(values)` | Value in allowed list |
-| `NotNullValidator()` | Not None |
-| `UniqueValueValidator()` | Unique in table |
+| `UniqueValueValidator()` | Unique in table (DB-enforced) |
+
+### Custom Validator (FunctionValidator)
+
+```python
+from ryx import FunctionValidator
+
+def must_be_even(value):
+    if value % 2 != 0:
+        raise ValidationError("Value must be even")
+
+class Product(Model):
+    code = CharField(
+        max_length=10,
+        validators=[FunctionValidator(must_be_even, message="Code must be even")],
+    )
+```
 
 ## Model-Level Validation
 
@@ -88,6 +104,23 @@ await product.save()  # Raises ValidationError
 
 # Skip validation (for bulk ops)
 await product.save(validate=False)
+```
+
+## Merging Validation Errors
+
+```python
+from ryx import ValidationError
+
+try:
+    await product.full_clean()
+except ValidationError as e:
+    # e.errors → {"name": ["Too short"], "price": ["Negative"]}
+    pass
+
+# Merge multiple errors
+errors = ValidationError({"name": ["Invalid"]})
+errors.merge(ValidationError({"price": ["Out of range"]}))
+# errors.errors → {"name": ["Invalid"], "price": ["Out of range"]}
 ```
 
 ## Collecting All Errors
