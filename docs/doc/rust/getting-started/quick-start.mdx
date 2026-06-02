@@ -1,0 +1,148 @@
+---
+sidebar_position: 3
+---
+
+# Quick Start
+
+Let's go from zero to a working query in 5 minutes.
+
+## 1. Define a Model
+
+```rust
+use ryx_rs::model;
+
+#[model]
+#[table("posts")]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    slug: String,
+    views: i64,
+    active: bool,
+}
+```
+
+- `#[model]` derives `Model`, `FromRow`, and more.
+- `#[field(pk)]` marks the primary key.
+- `#[table("posts")` optionally overrides the table name.
+
+## 2. Configure & Migrate
+
+```rust
+use ryx_rs::migration::MigrationRunner;
+
+async fn run() -> ryx_rs::RyxResult<()> {
+    ryx_rs::init().await?;
+    MigrationRunner::new()
+        .model::<Post>()
+        .run().await?;
+    Ok(())
+}
+```
+
+`init()` reads a `ryx.toml` or uses the `DATABASE_URL` env var.
+
+## 3. Create Records
+
+```rust
+let post = Post::objects().create()
+    .set("title", "Hello Ryx")
+    .set("slug", "hello-ryx")
+    .set("views", 42i64)
+    .set("active", true)
+    .save().await?;
+```
+
+## 4. Query
+
+```rust
+// All active posts, newest first
+let posts: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .order_by("-views")
+    .all().await?;
+
+// First match
+let first: Option<Post> = Post::objects()
+    .filter("active", true)
+    .order_by("title")
+    .first().await?;
+
+// Count
+let count = Post::objects()
+    .filter("active", true)
+    .count().await?;
+
+// Check existence
+let exists = Post::objects()
+    .filter("title__startswith", "Draft")
+    .exists().await?;
+```
+
+## 5. Update & Delete
+
+```rust
+// Bulk update
+Post::objects()
+    .filter("active", false)
+    .update(vec![("active", true)])
+    .await?;
+
+// Bulk delete
+Post::objects()
+    .filter("views", 0i64)
+    .delete().await?;
+```
+
+## Complete Example
+
+```rust
+use ryx_rs::model;
+use ryx_rs::migration::MigrationRunner;
+
+#[model]
+#[table("posts")]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    slug: String,
+    views: i64,
+    active: bool,
+}
+
+#[tokio::main]
+async fn main() -> ryx_rs::RyxResult<()> {
+    ryx_rs::init().await?;
+    MigrationRunner::new().model::<Post>().run().await?;
+
+    Post::objects().create()
+        .set("title", "Hello Ryx")
+        .set("slug", "hello-ryx")
+        .set("views", 100i64)
+        .save().await?;
+
+    let posts: Vec<Post> = Post::objects()
+        .filter("active", true)
+        .order_by("-views")
+        .all().await?;
+
+    println!("Found {} posts", posts.len());
+
+    let stats = Post::objects()
+        .aggregate(&[
+            ryx_rs::agg::count("total", "id"),
+            ryx_rs::agg::avg("avg", "views"),
+        ]).await?;
+
+    println!("Stats: {:?}", stats);
+
+    Ok(())
+}
+```
+
+## Next Steps
+
+- **[Models](../core-concepts/models)** — Deep dive into model definitions
+- **[QuerySet](../core-concepts/queryset)** — The full query API

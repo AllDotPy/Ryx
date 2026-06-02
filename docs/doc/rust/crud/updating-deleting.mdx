@@ -1,0 +1,47 @@
+---
+sidebar_position: 11
+---
+
+# Updating & Deleting Records
+
+## Bulk Update
+
+```rust
+// Update all matching rows
+Post::objects()
+    .filter("author", "bob")
+    .update(vec![("views", 9999i64)])
+    .await?;
+
+// Update multiple fields
+Post::objects()
+    .filter("active", false)
+    .update(vec![
+        ("active", true),
+        ("views", 0i64),
+    ]).await?;
+```
+
+The `.update()` method executes a single `UPDATE` SQL statement. It returns the number of affected rows.
+
+## Bulk Delete
+
+```rust
+// Delete matching rows
+Post::objects()
+    .filter("title__startswith", "Draft")
+    .delete().await?;
+
+// Delete all
+Post::objects().delete().await?;
+```
+
+The `.delete()` method returns the number of deleted rows.
+
+:::warning
+Bulk operations bypass per-instance hooks. They execute directly on the database.
+:::
+
+## Next Steps
+
+- **[Transactions](../advanced/transactions)** — Atomic operations

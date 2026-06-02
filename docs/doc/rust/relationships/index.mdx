@@ -1,0 +1,78 @@
+---
+sidebar_position: 12
+---
+
+# Relationships
+
+Ryx supports foreign-key relationships via `#[relation(...)]`.
+
+## Defining a Relation
+
+```rust
+#[model]
+struct Author {
+    #[field(pk)]
+    id: i64,
+    name: String,
+}
+
+#[model]
+#[relation(model = "Author", fk_column = "author_id", name = "author")]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    author_id: i64,
+    author: Option<Author>,
+}
+```
+
+The `#[relation]` attribute has three parameters:
+
+| Parameter | Description |
+|---|---|
+| `model` | The related model type |
+| `fk_column` | The foreign key column |
+| `name` | The struct field holding the related model |
+
+The related field must be `Option<RelatedModel>` — it's populated by `select_related`.
+
+## select_related
+
+Fetches related models in a single JOIN query, avoiding N+1:
+
+```rust
+let posts: Vec<Post> = Post::objects()
+    .all()
+    .select_related(&["author"])
+    .all().await?;
+
+for post in &posts {
+    if let Some(author) = &post.author {
+        println!("{} — by {}", post.title, author.name);
+    }
+}
+```
+
+Multiple relations:
+
+```rust
+Post::objects()
+    .all()
+    .select_related(&["author", "category"])
+    .all().await?;
+```
+
+## SQL Generated
+
+```sql
+SELECT "posts".*, "authors"."id" AS "author__id", "authors"."name" AS "author__name"
+FROM "posts"
+LEFT JOIN "authors" ON "posts"."author_id" = "authors"."id"
+```
+
+The result columns are aliased (`author__id`, `author__name`) and automatically decoded via `FromRow::from_row_prefixed` into the nested `Option<Author>`.
+
+## Next Steps
+
+- **[Transactions](../advanced/transactions)** — Atomic operations

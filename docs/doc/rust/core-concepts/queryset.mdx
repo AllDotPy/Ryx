@@ -1,0 +1,313 @@
+---
+sidebar_position: 5
+---
+
+# QuerySet
+
+`QuerySet<T>` is the lazy, chainable query builder. Every model's `objects()` manager returns one.
+
+## Entry Points
+
+```rust
+// ObjectsManager<T> — the entry point
+Post::objects()             // → ObjectsManager<Post>
+Post::objects().all()       // → QuerySet<Post> (all rows)
+Post::objects().filter("active", true)  // → QuerySet<Post>
+Post::objects().exclude("status", "draft")  // → QuerySet<Post>
+Post::objects().get("id", 1i64)  // → QuerySet<Post> (expects 1 row)
+Post::objects().create()    // → InsertBuilder<Post>
+```
+
+`QuerySet` methods are **chainable** and **lazy** — no query hits the database until awaited.
+
+## Filtering
+
+```rust
+// By field + value pair
+Post::objects().filter("active", true);
+Post::objects().filter("views__gte", 100i64);
+
+// With Q expressions
+Post::objects().filter(Q::or(
+    Q::new("active", true),
+    Q::new("views__gte", 1000),
+));
+
+// Exclude (NOT)
+Post::objects().exclude("status", "draft");
+Post::objects().exclude(Q::not("status", "draft"));
+
+// Chaining (AND)
+Post::objects()
+    .filter("active", true)
+    .filter("views__gt", 100i64);
+```
+
+### Supported Lookups
+
+| Lookup | SQL | Example |
+|---|---|---|
+| `exact` | `= ?` | `.filter("title", "Hello")` |
+| `gt` | `> ?` | `.filter("views__gt", 100)` |
+| `gte` | `>= ?` | `.filter("views__gte", 100)` |
+| `lt` | `< ?` | `.filter("views__lt", 50)` |
+| `lte` | `<= ?` | `.filter("views__lte", 1000)` |
+| `contains` | `LIKE '%?%'` | `.filter("title__contains", "Rust")` |
+| `icontains` | `LOWER(col) LIKE ?` | `.filter("title__icontains", "rust")` |
+| `startswith` | `LIKE '?%'` | `.filter("title__startswith", "Draft")` |
+| `istartswith` | `LOWER(col) LIKE ?` | `.filter("title__istartswith", "draft")` |
+| `endswith` | `LIKE '%?'` | `.filter("slug__endswith", "-ryx")` |
+| `iendswith` | `LOWER(col) LIKE ?` | `.filter("slug__iendswith", "-Ryx")` |
+| `in` | `IN (?, ...)` | `.filter("status__in", vec!["a", "b"])` |
+| `isnull` | `IS NULL / IS NOT NULL` | `.filter("author__isnull", true)` |
+| `range` | `BETWEEN ? AND ?` | `.filter("views__range", (100i64, 1000i64))` |
+
+### Date Transforms
+
+```rust
+.filter("created_at__year", 2024i64);
+.filter("created_at__month__gte", 6i64);
+.filter("created_at__day", 15i64);
+.filter("created_at__hour", 14i64);
+.filter("created_at__week", 20i64);
+.filter("created_at__quarter", 2i64);
+```
+
+## Q Objects
+
+```rust
+use ryx_rs::Q;
+
+// OR
+Post::objects().filter(Q::or(
+    Q::new("active", true),
+    Q::new("views__gte", 1000),
+));
+
+// AND
+Post::objects().filter(Q::and(
+    Q::new("active", true),
+    Q::new("featured", true),
+));
+
+// NOT
+Post::objects().filter(Q::not("status", "draft"));
+
+// Nested
+Post::objects().filter(Q::or(
+    Q::and(Q::new("active", true), Q::new("views__gte", 500)),
+    Q::new("featured", true),
+));
+```
+
+## Ordering
+
+```rust
+// Ascending
+Post::objects().order_by("title");
+
+// Descending (prefix with -)
+Post::objects().order_by("-views");
+
+// Multiple fields (single calls)
+Post::objects().order_by("-views").order_by("title");
+
+// Multiple fields at once
+Post::objects().order_by_all(&["-views", "title"]);
+```
+
+## Pagination
+
+```rust
+Post::objects().limit(10);
+Post::objects().limit(10).offset(20);
+```
+
+## Aggregations
+
+```rust
+use ryx_rs::agg::{count, sum, avg, min, max, count_distinct};
+
+let stats = Post::objects()
+    .aggregate(&[
+        count("total", "id"),
+        sum("total_views", "views"),
+        avg("avg_views", "views"),
+        min("min_views", "views"),
+        max("max_views", "views"),
+        count_distinct("unique_authors", "author_id"),
+    ]).await?;
+// stats: HashMap<String, SqlValue>
+```
+
+### Annotate
+
+```rust
+let annotated = Post::objects()
+    .annotate(&[count("comment_count", "id")])
+    .await?;
+// annotated: Vec<HashMap<String, SqlValue>>
+```
+
+### Values & ValuesList
+
+```rust
+// Vec<HashMap<String, SqlValue>>
+let values = Post::objects()
+    .values(&["title", "views"])
+    .await?;
+
+// Vec<Vec<SqlValue>>
+let list = Post::objects()
+    .values_list(&["title", "views"])
+    .await?;
+
+// GROUP BY — values + annotate
+let grouped = Post::objects()
+    .values(&["author_id"])
+    .annotate(&[
+        count("post_count", "id"),
+        sum("total_views", "views"),
+    ])
+    .order_by("-total_views")
+    .await?;
+```
+
+## Relationships
+
+```rust
+let posts: Vec<Post> = Post::objects()
+    .all()
+    .select_related(&["author"])
+    .all().await?;
+
+for post in &posts {
+    if let Some(author) = &post.author {
+        println!("{} — by {}", post.title, author.name);
+    }
+}
+```
+
+`select_related` is only available on models with `#[relation(...)]` attributes.
+
+## Execution Methods
+
+These execute the query and return results:
+
+```rust
+// All rows
+let all: Vec<Post> = Post::objects().all().await?;
+
+// First match (None if empty)
+let first: Option<Post> = Post::objects()
+    .filter("active", true)
+    .order_by("title")
+    .first().await?;
+
+// Get by field (panics if not found — use filter + first for safe access)
+let post: Post = Post::objects().get("id", 1i64).await?;
+
+// Count
+let count: i64 = Post::objects().filter("active", true).count().await?;
+
+// Exists
+let exists: bool = Post::objects()
+    .filter("title__startswith", "Draft")
+    .exists().await?;
+
+// Distinct
+Post::objects().distinct().all().await?;
+```
+
+## Update & Delete
+
+```rust
+// Bulk update (returns affected row count)
+let updated: u64 = Post::objects()
+    .filter("author", "bob")
+    .update(vec![("views", 9999i64)])
+    .await?;
+
+// Bulk delete (returns affected row count)
+let deleted: u64 = Post::objects()
+    .filter("title__startswith", "Draft")
+    .delete().await?;
+```
+
+## Multi-DB
+
+```rust
+Post::objects().using("logs").all().await?;
+Post::objects().using("users").filter("active", true).all().await?;
+```
+
+## Caching
+
+```rust
+let posts: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .cache(60, Some("active_posts"))  // TTL 60s, named key
+    .all().await?;
+
+// Without explicit key
+let posts: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .cache(60, None)
+    .all().await?;
+```
+
+Returns a `CachedQuerySet<T>` with a single `.all()` method.
+
+## Streaming (Keyset Pagination)
+
+```rust
+let mut stream = Post::objects()
+    .filter("active", true)
+    .order_by("id")
+    .stream(100, Some("id"));  // chunk_size, keyset field
+
+while let Some(chunk) = stream.next_chunk().await? {
+    for post in chunk {
+        // process 100 at a time
+    }
+}
+```
+
+`QueryStream<T>` yields `Vec<T>` chunks until exhausted.
+
+## Debug: View SQL
+
+```rust
+let sql = Post::objects()
+    .filter("title__contains", "Rust")
+    .sql()?;
+// → SELECT * FROM "posts" WHERE "title" LIKE '%Rust%'
+```
+
+## Value Types (IntoSqlValue)
+
+The `IntoSqlValue` trait converts Rust values for query parameters. Built-in types supported:
+
+| Rust Type | SQL |
+|---|---|
+| `i32`, `i64` | Integer |
+| `f64` | Float |
+| `bool` | Boolean |
+| `String`, `&str` | Text |
+| `Option<T>` | Nullable T |
+| `Vec<T>` | Multiple values (for `in`) |
+| `chrono::NaiveDateTime` | Timestamp |
+| `chrono::NaiveDate` | Date |
+
+```rust
+Post::objects().filter("views", 42i64);
+Post::objects().filter("active", true);
+Post::objects().filter("title", "Hello");
+Post::objects().filter("author_id", None::<i64>);
+Post::objects().filter("status__in", vec!["draft", "published"]);
+```
+
+## Next Steps
+
+- **[Migrations](./migrations)** — Schema management
+- **[CRUD](/rust/crud/creating)** — Create, read, update, delete

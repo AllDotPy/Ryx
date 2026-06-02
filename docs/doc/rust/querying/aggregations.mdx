@@ -1,0 +1,92 @@
+---
+sidebar_position: 8
+---
+
+# Aggregations & Values
+
+Compute summary values across your data.
+
+## Aggregate Functions
+
+```rust
+use ryx_rs::agg::{count, sum, avg, min, max};
+```
+
+| Function | SQL |
+|---|---|
+| `count(name, field)` | `COUNT(field)` |
+| `sum(name, field)` | `SUM(field)` |
+| `avg(name, field)` | `AVG(field)` |
+| `min(name, field)` | `MIN(field)` |
+| `max(name, field)` | `MAX(field)` |
+
+## aggregate() — Single Result
+
+```rust
+let stats = Post::objects()
+    .aggregate(&[
+        count("total", "id"),
+        sum("total_views", "views"),
+        avg("avg_views", "views"),
+        max("top_views", "views"),
+    ]).await?;
+
+println!("Total: {:?}", stats.get("total"));
+println!("Avg views: {:?}", stats.get("avg_views"));
+```
+
+Returns `HashMap<String, Value>`.
+
+## annotate() — Per-Row Values
+
+```rust
+let annotated = Post::objects()
+    .annotate(&[
+        count("comment_count", "id"),
+    ]).await?;
+
+for row in &annotated {
+    println!("Comments: {:?}", row.get("comment_count"));
+}
+```
+
+## values() — Dict Results
+
+```rust
+let values = Post::objects()
+    .values(&["title", "views"])
+    .await?;
+
+for row in &values {
+    println!("{}: {:?}", row.get("title").unwrap(), row.get("views").unwrap());
+}
+```
+
+## values_list() — Tuple Results
+
+```rust
+let list = Post::objects()
+    .values_list(&["title", "views"])
+    .await?;
+
+for cols in &list {
+    println!("{:?}", cols);
+}
+```
+
+## GROUP BY — values + annotate
+
+```rust
+let grouped = Post::objects()
+    .values(&["author_id"])
+    .annotate(&[
+        count("post_count", "id"),
+        sum("total_views", "views"),
+    ])
+    .order_by("-total_views")
+    .await?;
+```
+
+## Next Steps
+
+- **[Creating Records](../crud/creating)** — Insert data

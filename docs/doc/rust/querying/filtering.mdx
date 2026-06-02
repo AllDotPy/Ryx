@@ -1,0 +1,115 @@
+---
+sidebar_position: 7
+---
+
+# Filtering
+
+The `.filter()` method translates field + value pairs into SQL `WHERE` clauses.
+
+## Basic Syntax
+
+```rust
+// Exact match
+Post::objects().filter("active", true);
+Post::objects().filter("author_id", 5i64);
+
+// With a lookup
+Post::objects().filter("views__gt", 100i64);
+```
+
+Pattern: `field__lookup, value`. When no lookup is given, `exact` is used.
+
+## Comparison
+
+```rust
+Post::objects().filter("views__gt", 100i64);   // >
+Post::objects().filter("views__gte", 100i64);  // >=
+Post::objects().filter("views__lt", 50i64);    // <
+Post::objects().filter("views__lte", 50i64);   // <=
+```
+
+## String Lookups
+
+```rust
+Post::objects().filter("title__contains", "Python");    // LIKE '%Python%'
+Post::objects().filter("title__startswith", "How");      // LIKE 'How%'
+Post::objects().filter("title__endswith", "guide");      // LIKE '%guide'
+```
+
+## Null Checks
+
+```rust
+Post::objects().filter("body__isnull", true);   // IS NULL
+Post::objects().filter("body__isnull", false);  // IS NOT NULL
+```
+
+## Membership & Range
+
+```rust
+// IN clause
+Post::objects().filter("status__in", vec!["draft", "published"]);
+
+// BETWEEN
+Post::objects().filter("views__range", (100i64, 1000i64));
+```
+
+## Multiple Filters
+
+Multiple `.filter()` calls are AND-ed together:
+
+```rust
+Post::objects()
+    .filter("active", true)
+    .filter("views__gt", 100i64)
+    .filter("title__contains", "Rust");
+```
+
+## Excluding (NOT)
+
+Use `Q::not()`:
+
+```rust
+Post::objects().filter(Q::not("status", "draft"));
+
+Post::objects()
+    .filter("active", true)
+    .filter(Q::not("title__startswith", "Draft"));
+```
+
+## Date Transforms
+
+```rust
+Post::objects().filter("created_at__year", 2024i64);
+Post::objects().filter("created_at__month", 5i64);
+Post::objects().filter("created_at__day", 15i64);
+```
+
+These work with all comparison lookups: `created_at__year__gte=2024`.
+
+## Custom SQL
+
+```rust
+Post::objects()
+    .sql_filter("\"title\" ILIKE '%python%'");
+```
+
+## Lookup Reference
+
+| Lookup | SQL | Example |
+|---|---|---|
+| `exact` | `col = ?` | `.filter("title", "Hello")` |
+| `gt` | `col > ?` | `.filter("views__gt", 100)` |
+| `gte` | `col >= ?` | `.filter("views__gte", 100)` |
+| `lt` | `col < ?` | `.filter("views__lt", 50)` |
+| `lte` | `col <= ?` | `.filter("views__lte", 1000)` |
+| `contains` | `LIKE '%?%'` | `.filter("title__contains", "Py")` |
+| `startswith` | `LIKE '?%'` | `.filter("title__startswith", "How")` |
+| `endswith` | `LIKE '%?'` | `.filter("slug__endswith", "-ryx")` |
+| `in` | `IN (?, ...)` | `.filter("status__in", vec!["a","b"])` |
+| `isnull` | `IS NULL / IS NOT NULL` | `.filter("body__isnull", true)` |
+| `range` | `BETWEEN ? AND ?` | `.filter("views__range", (100, 1000))` |
+
+## Next Steps
+
+- **[Q Objects](./../core-concepts/queryset)** — Complex boolean expressions
+- **[Aggregations](./aggregations)** — Count, Sum, Avg

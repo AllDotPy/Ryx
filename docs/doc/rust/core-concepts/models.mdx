@@ -1,0 +1,111 @@
+---
+sidebar_position: 4
+---
+
+# Models
+
+Models are the heart of Ryx. In Rust, a model is a struct annotated with `#[model]`.
+
+## Basic Model
+
+```rust
+use ryx_rs::model;
+
+#[model]
+#[table("posts")]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    slug: String,
+    views: i64,
+    active: bool,
+    body: Option<String>,
+}
+```
+
+## Field Attributes
+
+| Attribute | Description |
+|---|---|
+| `#[field(pk)]` | Primary key |
+| `#[field(unique)]` | Unique constraint |
+| `#[field(nullable)]` | Allows `NULL` |
+| `#[field(index)]` | Create an index |
+| `#[field(column = "col_name")]` | Override the column name |
+| `#[field(db_type = "TEXT")]` | Force a specific SQL type |
+| `#[field(default = "0")]` | Default value expression |
+
+## Table Naming
+
+Without `#[table(...)]`, Ryx converts the struct name to `snake_case` plural:
+
+| Struct | Table |
+|---|---|
+| `Post` | `posts` |
+| `BlogPost` | `blog_posts` |
+| `Category` | `categories` |
+
+Override with `#[table("custom_name")]`.
+
+## Supported Field Types
+
+| Rust Type | SQL Column |
+|---|---|
+| `i64` | `BIGINT` |
+| `String` | `TEXT` / `VARCHAR` |
+| `bool` | `BOOLEAN` |
+| `f64` | `DOUBLE PRECISION` |
+| `chrono::NaiveDateTime` | `TIMESTAMP` |
+| `chrono::NaiveDate` | `DATE` |
+| `Option<T>` | Nullable version of `T` |
+| `Vec<T>` | (multi-value bind, e.g. `IN` clauses) |
+
+All types implement the `IntoSqlValue` trait for automatic query parameter conversion.
+
+## Relationships
+
+Use `#[relation(...)]` for foreign keys:
+
+```rust
+#[model]
+struct Author {
+    #[field(pk)]
+    id: i64,
+    name: String,
+}
+
+#[model]
+#[relation(model = "Author", fk_column = "author_id", name = "author")]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    author_id: i64,
+    author: Option<Author>,
+}
+```
+
+| Parameter | Description |
+|---|---|
+| `model` | The related model type |
+| `fk_column` | The foreign key column name |
+| `name` | The struct field name (must match) |
+| `to_table` | (optional) Target table, defaults to related model's table |
+| `to_field` | (optional) Target column, defaults to primary key |
+
+## How #[model] Works
+
+The `#[model]` attribute is shorthand for combining:
+
+```rust
+#[derive(Serialize, Deserialize)]  // from serde
+#[derive(Model)]                   // Model + Relationships traits
+#[derive(FromRow)]                 // Row deserialization
+// All in one step
+```
+
+## Next Steps
+
+- **[QuerySet](./queryset)** — Query your data
+- **[Migrations](./migrations)** — Create tables automatically

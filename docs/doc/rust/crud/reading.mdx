@@ -1,0 +1,92 @@
+---
+sidebar_position: 10
+---
+
+# Reading Records
+
+## All Records
+
+```rust
+let all: Vec<Post> = Post::objects().all().await?;
+```
+
+## Filtered
+
+```rust
+let active: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .all().await?;
+```
+
+## First Record
+
+```rust
+// Returns None if no match
+let first: Option<Post> = Post::objects()
+    .filter("active", true)
+    .order_by("title")
+    .first().await?;
+```
+
+## Get by ID
+
+```rust
+let post: Option<Post> = Post::objects()
+    .filter("id", 1i64)
+    .first().await?;
+```
+
+## Count
+
+```rust
+let count = Post::objects()
+    .filter("active", true)
+    .count().await?;
+```
+
+## Exists
+
+```rust
+if Post::objects()
+    .filter("title__startswith", "Draft")
+    .exists().await? {
+    println!("Has drafts");
+}
+```
+
+## Ordering & Pagination
+
+```rust
+// Ordering
+Post::objects().order_by("-views");
+
+// Limit / Offset
+Post::objects().limit(10).offset(20);
+
+// Combined
+let page: Vec<Post> = Post::objects()
+    .filter("active", true)
+    .order_by("-views")
+    .limit(20)
+    .offset(40)
+    .all().await?;
+```
+
+## Streaming (Keyset Pagination)
+
+```rust
+let mut stream = Post::objects()
+    .filter("active", true)
+    .order_by("id")
+    .stream(100, Some("id"));
+
+while let Some(chunk) = stream.next_chunk().await? {
+    for post in chunk {
+        // process 100 at a time
+    }
+}
+```
+
+## Next Steps
+
+- **[Updating & Deleting](./updating-deleting)** — Modify and remove records
