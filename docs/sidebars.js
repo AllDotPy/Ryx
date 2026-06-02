@@ -109,6 +109,56 @@ const sidebars = {
         'cookbook/deployment',
       ],
     },
+    {
+      type: 'category',
+      label: '🦀 Rust',
+      link: { type: 'doc', id: 'rust/index' },
+      items: [
+        {
+          type: 'category',
+          label: 'Getting Started',
+          items: [
+            'rust/getting-started/installation',
+            'rust/getting-started/quick-start',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Core Concepts',
+          items: [
+            'rust/core-concepts/models',
+            'rust/core-concepts/queryset',
+            'rust/core-concepts/migrations',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'Querying',
+          items: [
+            'rust/querying/filtering',
+            'rust/querying/aggregations',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'CRUD',
+          items: [
+            'rust/crud/creating',
+            'rust/crud/reading',
+            'rust/crud/updating-deleting',
+          ],
+        },
+        'rust/relationships/index',
+        {
+          type: 'category',
+          label: 'Advanced',
+          items: [
+            'rust/advanced/transactions',
+            'rust/advanced/caching',
+          ],
+        },
+      ],
+    },
   ],
 };
 
