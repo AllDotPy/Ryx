@@ -55,6 +55,8 @@ pub struct RelationMeta {
     pub to_table: &'static str,
     /// PK column on the related table (e.g., `"id"`)
     pub to_field: &'static str,
+    /// Column names of the related model (used by select_related for column aliasing)
+    pub relation_fields: &'static [&'static str],
 }
 
 /// Optional trait for models that have foreign-key relationships.
