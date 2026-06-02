@@ -5,10 +5,10 @@ edition = "2024"
 description = "Rust-native ORM with Django-like syntax, powered by sqlx"
 
 [dependencies]
-ryx-common = { path = "../ryx-common" }
-ryx-query = { path = "../ryx-query" }
-ryx-backend = { path = "../ryx-backend", default-features = false }
-ryx-macro = { path = "../ryx-macro" }
+ryx-common = { path = "../ryx-common", version = "0.1" }
+ryx-query = { path = "../ryx-query", version = "0.1" }
+ryx-backend = { path = "../ryx-backend", version = "0.1", default-features = false }
+ryx-macro = { path = "../ryx-macro", version = "0.1" }
 
 sqlx = { workspace = true }
 tokio = { workspace = true }
