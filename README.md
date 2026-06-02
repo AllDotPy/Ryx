@@ -87,8 +87,8 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 </p>
 
 ```
-          Python (ryx-python)           Rust (ryx-rs)
-                │                            │
+          Python (ryx-python)        Rust (ryx-rs)
+                │                         │
           PyO3 bridge ────────╗       no pyo3
                 │             ║           │
           ┌─────┴─────────────║───────────┴──────┐
@@ -96,12 +96,12 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
           └─────┬─────────────║───────────┬──────┘
                 │             ║           │
           ┌─────┴─────────────║───────────┴──────┐
-          │         ryx-query (SQL compiler)       │
+          │         ryx-query (SQL compiler)     │
           └───────────────────┬──────────────────┘
                               │
           ┌───────────────────┴──────────────────┐
-          │          ryx-backend (sqlx)            │
-          │    Postgres · MySQL · SQLite           │
+          │          ryx-backend (sqlx)          │
+          │    Postgres · MySQL · SQLite         │
           └──────────────────────────────────────┘
 ```
 
