@@ -70,9 +70,10 @@ fn parse_field_attr(field: &syn::Field) -> FieldAttr {
 /// Parsed content of a `#[relation(...)]` struct-level attribute.
 struct RelationAttr {
     name: String,
+    model: String,
     fk_column: String,
-    to_table: String,
-    to_field: String,
+    to_table: Option<String>,
+    to_field: Option<String>,
 }
 
 fn parse_relation_attrs(attrs: &[Attribute]) -> Vec<RelationAttr> {
@@ -86,25 +87,43 @@ fn parse_relation_attrs(attrs: &[Attribute]) -> Vec<RelationAttr> {
             let raw = quote!(#tokens).to_string();
             let mut rel = RelationAttr {
                 name: String::new(),
+                model: String::new(),
                 fk_column: String::new(),
-                to_table: String::new(),
-                to_field: "id".to_string(),
+                to_table: None,
+                to_field: None,
             };
             for segment in raw.split(',') {
                 let segment = segment.trim();
                 if let Some(val) = segment.strip_prefix("name = ") {
                     rel.name = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                } else if let Some(val) = segment.strip_prefix("model = ") {
+                    rel.model = val.trim().trim_matches('"').trim_matches('\'').to_string();
                 } else if let Some(val) = segment.strip_prefix("fk_column = ") {
                     rel.fk_column = val.trim().trim_matches('"').trim_matches('\'').to_string();
                 } else if let Some(val) = segment.strip_prefix("to_table = ") {
-                    rel.to_table = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                    rel.to_table = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 } else if let Some(val) = segment.strip_prefix("to_field = ") {
-                    rel.to_field = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                    rel.to_field = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 }
             }
-            if !rel.name.is_empty() && !rel.fk_column.is_empty() && !rel.to_table.is_empty() {
-                relations.push(rel);
+            if rel.model.is_empty() {
+                continue;
             }
+            // Default name: snake_case of model name
+            if rel.name.is_empty() {
+                let s = &rel.model;
+                let mut result = String::with_capacity(s.len() + 5);
+                for (i, c) in s.chars().enumerate() {
+                    if c.is_uppercase() && i > 0 {
+                        result.push('_');
+                        result.push(c.to_ascii_lowercase());
+                    } else {
+                        result.push(c.to_ascii_lowercase());
+                    }
+                }
+                rel.name = result;
+            }
+            relations.push(rel);
         }
     }
     relations
@@ -119,14 +138,30 @@ fn generate_relationships_impl(name: &syn::Ident, relations: &[RelationAttr]) ->
         .map(|r| {
             let rel_name = &r.name;
             let fk_col = &r.fk_column;
-            let to_tbl = &r.to_table;
-            let to_fld = &r.to_field;
+            let model_ident = syn::Ident::new(&r.model, proc_macro2::Span::call_site());
+            // to_table: optional override, else ModelType::table_name()
+            let to_table = match &r.to_table {
+                Some(s) => {
+                    let lit = syn::LitStr::new(s, proc_macro2::Span::call_site());
+                    quote! { #lit }
+                }
+                None => quote! { <#model_ident as ::ryx_rs::model::Model>::table_name() },
+            };
+            // to_field: optional override, else ModelType::pk_field()
+            let to_field = match &r.to_field {
+                Some(s) => {
+                    let lit = syn::LitStr::new(s, proc_macro2::Span::call_site());
+                    quote! { #lit }
+                }
+                None => quote! { <#model_ident as ::ryx_rs::model::Model>::pk_field() },
+            };
             quote! {
                 ::ryx_rs::model::RelationMeta {
                     name: #rel_name,
                     fk_column: #fk_col,
-                    to_table: #to_tbl,
-                    to_field: #to_fld,
+                    to_table: #to_table,
+                    to_field: #to_field,
+                    relation_fields: <#model_ident as ::ryx_rs::model::Model>::field_names(),
                 }
             }
         })
@@ -135,7 +170,9 @@ fn generate_relationships_impl(name: &syn::Ident, relations: &[RelationAttr]) ->
     quote! {
         impl ::ryx_rs::model::Relationships for #name {
             fn relations() -> &'static [::ryx_rs::model::RelationMeta] {
-                &[#(#entries),*]
+                use ::std::sync::OnceLock;
+                static RELS: OnceLock<Vec<::ryx_rs::model::RelationMeta>> = OnceLock::new();
+                RELS.get_or_init(|| vec![#(#entries),*])
             }
         }
     }
@@ -238,6 +275,18 @@ fn is_pk_field(field: &syn::Field) -> bool {
 
 fn type_to_sql_reader(ty: &Type, col_name: &str) -> proc_macro2::TokenStream {
     let col_str = col_name.to_string();
+    let col_ts = quote! { #col_str };
+    type_to_sql_reader_expr(ty, col_ts.clone(), col_ts)
+}
+
+/// Same as `type_to_sql_reader` but uses arbitrary expressions for column access.
+/// `col_expr` — expression yielding `&str` for `row.get()`
+/// `err_col` — expression for error messages
+fn type_to_sql_reader_expr(
+    ty: &Type,
+    col_expr: proc_macro2::TokenStream,
+    err_col: proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
 
     match ty {
         Type::Path(type_path) => {
@@ -249,75 +298,75 @@ fn type_to_sql_reader(ty: &Type, col_name: &str) -> proc_macro2::TokenStream {
                 let inner_type = &type_path.path.segments.last().unwrap();
                 if let syn::PathArguments::AngleBracketed(args) = &inner_type.arguments {
                     if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                        let inner = type_to_sql_reader(inner_ty, col_name);
+                        let inner = type_to_sql_reader_expr(inner_ty, col_expr.clone(), err_col.clone());
                         return quote! {
-                            match row.get(#col_str) {
+                            match row.get(#col_expr) {
                                 Some(v) => Some({ #inner }),
                                 None => None,
                             }
                         };
                     }
                 }
-                return quote! { row.get(#col_str).and_then(|v| v.as_null().map(|_| None)).unwrap_or(None) };
+                return quote! { row.get(#col_expr).and_then(|v| v.as_null().map(|_| None)).unwrap_or(None) };
             }
 
             let sv = quote! { ::ryx_rs::SqlValue };
             match ident_str.as_str() {
                 "i32" => quote! {
-                    row.get(#col_str).and_then(|v: &#sv| match v {
+                    row.get(#col_expr).and_then(|v: &#sv| match v {
                         #sv::Int(n) => Some(*n as i32),
                         _ => None,
-                    }).ok_or_else(|| internal_err(#col_str, "i32"))?
+                    }).ok_or_else(|| internal_err(#err_col, "i32"))?
                 },
                 "i64" => quote! {
-                    row.get(#col_str).and_then(|v: &#sv| match v {
+                    row.get(#col_expr).and_then(|v: &#sv| match v {
                         #sv::Int(n) => Some(*n),
                         _ => None,
-                    }).ok_or_else(|| internal_err(#col_str, "i64"))?
+                    }).ok_or_else(|| internal_err(#err_col, "i64"))?
                 },
                 "String" => quote! {
-                    row.get(#col_str).and_then(|v: &#sv| match v {
+                    row.get(#col_expr).and_then(|v: &#sv| match v {
                         #sv::Text(s) => Some(s.clone()),
                         _ => None,
-                    }).ok_or_else(|| internal_err(#col_str, "String"))?
+                    }).ok_or_else(|| internal_err(#err_col, "String"))?
                 },
                 "bool" => quote! {
-                    row.get(#col_str).and_then(|v: &#sv| match v {
+                    row.get(#col_expr).and_then(|v: &#sv| match v {
                         #sv::Bool(b) => Some(*b),
                         #sv::Int(n) => Some(*n != 0),
                         _ => None,
-                    }).ok_or_else(|| internal_err(#col_str, "bool"))?
+                    }).ok_or_else(|| internal_err(#err_col, "bool"))?
                 },
                 "f64" => quote! {
-                    row.get(#col_str).and_then(|v: &#sv| match v {
+                    row.get(#col_expr).and_then(|v: &#sv| match v {
                         #sv::Float(f) => Some(*f),
                         #sv::Int(n) => Some(*n as f64),
                         _ => None,
-                    }).ok_or_else(|| internal_err(#col_str, "f64"))?
+                    }).ok_or_else(|| internal_err(#err_col, "f64"))?
                 },
                 _ => {
                     // Try chrono types
                     if ident_str == "NaiveDateTime" {
                         quote! {
-                            row.get(#col_str).and_then(|v: &#sv| match v {
+                            row.get(#col_expr).and_then(|v: &#sv| match v {
                                 #sv::Text(s) => chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").ok(),
                                 _ => None,
-                            }).ok_or_else(|| internal_err(#col_str, "NaiveDateTime"))?
+                            }).ok_or_else(|| internal_err(#err_col, "NaiveDateTime"))?
                         }
                     } else if ident_str == "NaiveDate" {
                         quote! {
-                            row.get(#col_str).and_then(|v: &#sv| match v {
+                            row.get(#col_expr).and_then(|v: &#sv| match v {
                                 #sv::Text(s) => chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok(),
                                 _ => None,
-                            }).ok_or_else(|| internal_err(#col_str, "NaiveDate"))?
+                            }).ok_or_else(|| internal_err(#err_col, "NaiveDate"))?
                         }
                     } else {
                         // Fallback: try to parse as string
                         quote! {
-                            row.get(#col_str).and_then(|v: &#sv| match v {
+                            row.get(#col_expr).and_then(|v: &#sv| match v {
                                 #sv::Text(s) => Some(s.parse().ok()),
                                 _ => None,
-                            }).flatten().ok_or_else(|| internal_err(#col_str, #ident_str))?
+                            }).flatten().ok_or_else(|| internal_err(#err_col, #ident_str))?
                         }
                     }
                 }
@@ -548,15 +597,25 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
         other => other.clone(),
     };
 
-    let fnames = field_names(&data_fields);
+    let fnames_original = field_names(&data_fields);
     let pk = pk_field_name(&data_fields);
 
-    // Build FieldMeta array entries
+    // Collect relation field names — computed here so field_meta can skip them
+    let relation_field_names: std::collections::HashSet<String> =
+        relations.iter().map(|r| r.name.clone()).collect();
+
+    // Filter field names to exclude relation fields (not real DB columns)
+    let fnames: Vec<String> = fnames_original
+        .into_iter()
+        .filter(|name| !relation_field_names.contains(name))
+        .collect();
+
+    // Build FieldMeta array entries (skip relation fields)
     let field_meta_entries: Vec<_> = match &data_fields {
         syn::Fields::Named(named) => named
             .named
             .iter()
-            .map(|field| {
+            .filter_map(|field| {
                 let fattr = parse_field_attr(field);
                 let col_name = fattr.column.clone().unwrap_or_else(|| {
                     field
@@ -565,6 +624,15 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         .map(|i| i.to_string())
                         .unwrap_or_default()
                 });
+                let field_name_str = field
+                    .ident
+                    .as_ref()
+                    .map(|i| i.to_string())
+                    .unwrap_or_default();
+                // Skip relation fields — they are not DB columns
+                if relation_field_names.contains(&field_name_str) {
+                    return None;
+                }
                 let db_type = rust_type_to_sql(&field.ty, &fattr);
                 let nullable = fattr.nullable || peel_option(&field.ty).1;
                 let pk = fattr.pk;
@@ -577,7 +645,7 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     }
                     None => quote! { None },
                 };
-                quote! {
+                Some(quote! {
                     ::ryx_rs::model::FieldMeta {
                         name: #col_name,
                         db_type: #db_type,
@@ -586,7 +654,7 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
                         unique: #unique,
                         default: #default,
                     }
-                }
+                })
             })
             .collect(),
         _ => vec![],
@@ -610,30 +678,6 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
         table_name
     };
 
-    // Build FromRow field reads
-    let field_reads: Vec<_> = match &data_fields {
-        syn::Fields::Named(named) => named
-            .named
-            .iter()
-            .map(|field| {
-                let col_name = field_column_name(field);
-                let col_name = if col_name.is_empty() {
-                    field
-                        .ident
-                        .as_ref()
-                        .map(|i| i.to_string())
-                        .unwrap_or_default()
-                } else {
-                    col_name
-                };
-                let field_name = &field.ident;
-                let reader = type_to_sql_reader(&field.ty, &col_name);
-                quote! { #field_name: #reader }
-            })
-            .collect(),
-        _ => vec![],
-    };
-
     // Strip #[table], #[field], #[relation] helper attrs
     strukt.attrs.retain(|a| {
         !a.path().is_ident("table") && !a.path().is_ident("field") && !a.path().is_ident("relation")
@@ -646,6 +690,177 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 
     let relationships_impl2 = generate_relationships_impl(name, &relations);
+
+    // Build field_reads for FromRow::from_row (skip relation fields → None)
+    let field_reads: Vec<_> = match &data_fields {
+        syn::Fields::Named(named) => named
+            .named
+            .iter()
+            .filter_map(|field| {
+                let col_name = field_column_name(field);
+                let col_name = if col_name.is_empty() {
+                    field
+                        .ident
+                        .as_ref()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default()
+                } else {
+                    col_name
+                };
+                let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                if relation_field_names.contains(&field_name_str) {
+                    Some(quote! { #field_name: None })
+                } else {
+                    let reader = type_to_sql_reader(&field.ty, &col_name);
+                    Some(quote! { #field_name: #reader })
+                }
+            })
+            .collect(),
+        _ => vec![],
+    };
+
+    // Build field_reads for from_row_prefixed (skip relation fields, prefix column names)
+    let prefixed_field_reads: Vec<_> = match &data_fields {
+        syn::Fields::Named(named) => named
+            .named
+            .iter()
+            .filter_map(|field| {
+                let col_name = field_column_name(field);
+                let col_name = if col_name.is_empty() {
+                    field
+                        .ident
+                        .as_ref()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default()
+                } else {
+                    col_name
+                };
+                let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                if relation_field_names.contains(&field_name_str) {
+                    Some(quote! { #field_name: None })
+                } else {
+                    let col_expr = quote! { &::std::format!("{}__{}", prefix, #col_name) };
+                    let err_col = col_name.to_string();
+                    let err_ts = quote! { #err_col };
+                    let reader = type_to_sql_reader_expr(&field.ty, col_expr, err_ts);
+                    Some(quote! { #field_name: #reader })
+                }
+            })
+            .collect(),
+        _ => vec![],
+    };
+
+    // Build field_reads for from_row_joined (main fields direct, relation fields via from_row_prefixed)
+    let joined_field_reads: Vec<_> = match &data_fields {
+        syn::Fields::Named(named) => named
+            .named
+            .iter()
+            .filter_map(|field| {
+                let col_name = field_column_name(field);
+                let col_name = if col_name.is_empty() {
+                    field
+                        .ident
+                        .as_ref()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default()
+                } else {
+                    col_name
+                };
+                let field_name = &field.ident;
+                let field_name_str = field_name.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                if let Some(rel) = relations.iter().find(|r| r.name == field_name_str) {
+                    let rel_type: syn::Type = syn::parse_str(&rel.model)
+                        .unwrap_or_else(|_| panic!("Invalid model type '{}' in relation", rel.model));
+                    let rel_name = &rel.name;
+                    Some(quote! {
+                        #field_name: {
+                            let __rel_pk_col = ::std::format!("{}__{}", #rel_name, <#rel_type as ::ryx_rs::model::Model>::pk_field());
+                            let __rel_pk_val = row.get(&__rel_pk_col);
+                            match __rel_pk_val {
+                                Some(v) if !matches!(v, ::ryx_rs::SqlValue::Null) => {
+                                    Some(#rel_type::from_row_prefixed(row, #rel_name)?)
+                                }
+                                _ => None,
+                            }
+                        }
+                    })
+                } else {
+                    let reader = type_to_sql_reader(&field.ty, &col_name);
+                    Some(quote! { #field_name: #reader })
+                }
+            })
+            .collect(),
+        _ => vec![],
+    };
+
+    // Build FromRow impl(s) — always includes from_row and from_row_prefixed.
+    // from_row_joined is only generated when the model itself has relations.
+    let from_row_trait_impl = if relations.is_empty() {
+        quote! {
+            impl ::ryx_rs::row::FromRow for #name {
+                fn from_row(row: &::ryx_rs::row::RowView) -> ::ryx_rs::RyxResult<Self> {
+                    fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
+                        ::ryx_rs::RyxError::Internal(format!(
+                            "Failed to decode column '{}' as {}", col, ty
+                        ))
+                    }
+                    Ok(Self {
+                        #(#field_reads),*
+                    })
+                }
+
+                fn from_row_prefixed(row: &::ryx_rs::row::RowView, prefix: &str) -> ::ryx_rs::RyxResult<Self> {
+                    fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
+                        ::ryx_rs::RyxError::Internal(format!(
+                            "Failed to decode column '{}' as {}", col, ty
+                        ))
+                    }
+                    Ok(Self {
+                        #(#prefixed_field_reads),*
+                    })
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl ::ryx_rs::row::FromRow for #name {
+                fn from_row(row: &::ryx_rs::row::RowView) -> ::ryx_rs::RyxResult<Self> {
+                    fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
+                        ::ryx_rs::RyxError::Internal(format!(
+                            "Failed to decode column '{}' as {}", col, ty
+                        ))
+                    }
+                    Ok(Self {
+                        #(#field_reads),*
+                    })
+                }
+
+                fn from_row_joined(row: &::ryx_rs::row::RowView) -> ::ryx_rs::RyxResult<Self> {
+                    fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
+                        ::ryx_rs::RyxError::Internal(format!(
+                            "Failed to decode column '{}' as {}", col, ty
+                        ))
+                    }
+                    Ok(Self {
+                        #(#joined_field_reads),*
+                    })
+                }
+
+                fn from_row_prefixed(row: &::ryx_rs::row::RowView, prefix: &str) -> ::ryx_rs::RyxResult<Self> {
+                    fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
+                        ::ryx_rs::RyxError::Internal(format!(
+                            "Failed to decode column '{}' as {}", col, ty
+                        ))
+                    }
+                    Ok(Self {
+                        #(#prefixed_field_reads),*
+                    })
+                }
+            }
+        }
+    };
 
     let expanded = quote! {
         #[derive(::ryx_rs::serde::Serialize, ::ryx_rs::serde::Deserialize)]
@@ -669,18 +884,7 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
             }
         }
 
-        impl ::ryx_rs::row::FromRow for #name {
-            fn from_row(row: &::ryx_rs::row::RowView) -> ::ryx_rs::RyxResult<Self> {
-                fn internal_err(col: &str, ty: &str) -> ::ryx_rs::RyxError {
-                    ::ryx_rs::RyxError::Internal(format!(
-                        "Failed to decode column '{}' as {}", col, ty
-                    ))
-                }
-                Ok(Self {
-                    #(#field_reads),*
-                })
-            }
-        }
+        #from_row_trait_impl
 
         #relationships_impl2
     };
