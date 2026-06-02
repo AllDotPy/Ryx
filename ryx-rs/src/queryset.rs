@@ -168,8 +168,13 @@ impl<T: FromRow> QuerySet<T> {
     }
 
     pub async fn all(self) -> RyxResult<Vec<T>> {
+        let has_joins = !self.node.extra_aliases.is_empty();
         let rows = self.fetch_raw_rows().await?;
-        rows.iter().map(T::from_row).collect()
+        if has_joins {
+            rows.iter().map(|r| T::from_row_joined(r)).collect()
+        } else {
+            rows.iter().map(|r| T::from_row(r)).collect()
+        }
     }
 
     pub async fn get(self, field: &str, value: impl IntoSqlValue) -> RyxResult<T> {
@@ -430,6 +435,7 @@ impl<T: FromRow + crate::model::Relationships> QuerySet<T> {
     pub fn select_related(mut self, relations: &[&str]) -> Self {
         let all_rels = T::relations();
         let table = T::table_name();
+        let mut rel_names_used: Vec<&str> = Vec::new();
         for name in relations {
             if let Some(rel) = all_rels.iter().find(|r| r.name == *name) {
                 let join = JoinClause {
@@ -437,11 +443,35 @@ impl<T: FromRow + crate::model::Relationships> QuerySet<T> {
                     table: Symbol::from(rel.to_table),
                     alias: Some(Symbol::from(rel.name)),
                     on_left: format!("{}.{}", table, rel.fk_column),
-                    on_right: format!("{}.{}", rel.to_table, rel.to_field),
+                    on_right: format!("{}.{}", rel.name, rel.to_field),
                 };
                 self.node = self.node.with_join(join);
+                rel_names_used.push(rel.name);
             }
         }
+
+        // Build explicit main-table column list (qualified, to avoid ambiguity)
+        let main_cols: Vec<Symbol> = T::field_names()
+            .iter()
+            .map(|f| format!("{}.{}", table, f).into())
+            .collect();
+
+        // Build extra aliases for each relation's fields:
+        //   SELECT "alias"."field" AS "alias__field"
+        for rel_name in &rel_names_used {
+            if let Some(rel) = all_rels.iter().find(|r| r.name == *rel_name) {
+                for field in rel.relation_fields {
+                    self.node = self.node.with_extra_alias(
+                        format!("{}.{}", rel.name, field),
+                        format!("{}__{}", rel.name, field),
+                    );
+                }
+            }
+        }
+
+        self.node.operation = QueryOperation::Select {
+            columns: Some(main_cols),
+        };
         self
     }
 }
