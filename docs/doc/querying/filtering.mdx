@@ -141,14 +141,24 @@ import ryx
 
 # Postgres ILIKE
 ryx.register_lookup("ilike", "{col} ILIKE ?")
-
-# Usage
 Post.objects.filter(title__ilike="%python%")
 
 # Decorator style
 @ryx.lookup("uuid_prefix")
 def uuid_prefix_lookup(field, value):
     """{col}::text LIKE ?"""
+```
+
+## Listing Available Lookups & Transforms
+
+```python
+# All built-in filter lookups
+lookups = ryx.available_lookups()
+# → ["exact", "gt", "gte", "lt", "lte", "contains", ...]
+
+# All date/json transforms
+transforms = ryx.available_transforms()
+# → ["date", "year", "month", "day", "key", "json", ...]
 ```
 
 ## Next Steps
