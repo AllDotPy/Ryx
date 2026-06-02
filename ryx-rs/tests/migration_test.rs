@@ -35,16 +35,6 @@ struct Author {
     name: String,
 }
 
-#[model]
-#[table("posts_rel")]
-#[relation(name = "author", fk_column = "author_id", to_table = "authors", to_field = "id")]
-struct PostWithRelation {
-    #[field(pk)]
-    id: i64,
-    title: String,
-    author_id: i64,
-}
-
 // ── Sequential test ────────────────────────────────────────────
 
 async fn init_pool() {
