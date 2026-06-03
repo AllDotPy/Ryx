@@ -6,7 +6,10 @@ based on the model, the operation (read vs write), or other hints.
 """
 
 from __future__ import annotations
+import logging
 from typing import Any, Optional, TYPE_CHECKING
+
+logger = logging.getLogger("ryx.router")
 
 if TYPE_CHECKING:
     from ryx.models import Model
@@ -42,6 +45,7 @@ def set_router(router: BaseRouter) -> None:
     """Set the global router for the application."""
     global _router
     _router = router
+    logger.info("Router set: %s", type(router).__name__)
 
 
 def get_router() -> Optional[BaseRouter]:
