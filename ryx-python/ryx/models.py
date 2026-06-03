@@ -26,11 +26,14 @@ The Model class is the heart of the Ryx ORM. It provides:
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from ryx import ryx_core as _core
+
+logger = logging.getLogger("ryx.models")
 from ryx.exceptions import DoesNotExist, MultipleObjectsReturned
 from ryx.fields import AutoField, DateTimeField, DateField, TimeField, Field, ManyToManyField
 from ryx.signals import post_delete, post_save, pre_delete, pre_save
@@ -233,6 +236,7 @@ class Manager:
 
     async def create(self, **kw):
         """Create and save a new model instance."""
+        logger.debug("Manager.create(%s): %s", self._model.__name__, kw)
         instance = self._model(**kw)
 
         # Use the manager's alias if specified
@@ -613,6 +617,10 @@ class Model(metaclass=ModelMetaclass):
             if alias:
                 builder = builder.set_using(alias)
             new_id = await builder.execute_insert(values, returning_id=True)
+            logger.debug(
+                "INSERT %s (pk=%s) on %s",
+                type(self).__name__, new_id, alias or "default",
+            )
             if self._meta.pk_field:
                 object.__setattr__(self, self._meta.pk_field.attname, new_id)
 
@@ -642,6 +650,11 @@ class Model(metaclass=ModelMetaclass):
                 pk_field.column, "exact", self.pk, negated=False
             )
             await builder.execute_update(values)
+            logger.debug(
+                "UPDATE %s (pk=%s, fields=%s) on %s",
+                type(self).__name__, self.pk,
+                [f.column for f in fields_to_save], alias or "default",
+            )
 
         # after_save hook
         await self.after_save(created)
@@ -681,6 +694,10 @@ class Model(metaclass=ModelMetaclass):
             builder = builder.set_using(alias)
         builder = builder.add_filter(pk_field.column, "exact", self.pk, negated=False)
         await builder.execute_delete()
+        logger.debug(
+            "DELETE %s (pk=%s) on %s",
+            type(self).__name__, self.pk, alias or "default",
+        )
 
         # Clear pk to signal "no longer in DB"
         object.__setattr__(self, self._meta.pk_field.attname, None)
