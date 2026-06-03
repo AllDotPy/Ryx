@@ -4,14 +4,15 @@ Ryx ORM — Migration Runner  (backend-aware, full DDL support)
 Applies pending schema changes to the live database.
 Uses DDLGenerator for backend-correct SQL (Postgres / MySQL / SQLite).
 
-Steps:
-  1. Ensure the ryx_migrations tracking table exists
-  2. Introspect the live database schema
-  3. Build the target schema from Model declarations
-  4. Diff the two states
-  5. Generate DDL via DDLGenerator (backend-aware)
-  6. Execute each DDL statement
-  7. Also create indexes and constraints declared in Model.Meta
+Discovery strategy — Flat + Meta-routing:
+  1. Recursively find all ``[0-9]*.py`` files under ``migrations/`` (flat, by global sort).
+  2. For each database alias, filter operations by reading ``op.model._meta.database``.
+  3. Apply only relevant operations per alias; track as ``alias|stem`` in ``ryx_migrations``.
+  4. If no files exist, offer an interactive fallback (Live / Auto / Manual / Skip).
+
+CLI output uses ANSI colors (``[ryx]`` prefix in bold blue, ✓ in green,
+✗ in red, ⚠ in yellow). Colors auto-disable when ``NO_COLOR`` is set or
+stdout is not a TTY.
 """
 
 from __future__ import annotations
