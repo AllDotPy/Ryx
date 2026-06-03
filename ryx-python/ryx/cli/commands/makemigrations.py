@@ -29,6 +29,11 @@ class MakeMigrationsCommand(Command):
             help="Migrations directory (default: migrations)",
         )
         parser.add_argument(
+            "--alias",
+            metavar="ALIAS",
+            help="Database alias to generate migrations for (creates subdirectory)",
+        )
+        parser.add_argument(
             "--name", metavar="NAME", help="Override migration name slug"
         )
         parser.add_argument(
@@ -49,7 +54,11 @@ class MakeMigrationsCommand(Command):
 
         from ryx.migrations.autodetect import Autodetector
 
-        detector = Autodetector(models=models, migrations_dir=args.dir)
+        detector = Autodetector(
+            models=models,
+            migrations_dir=args.dir,
+            alias=getattr(args, "alias", None),
+        )
         operations = detector.detect()
 
         if not operations:
