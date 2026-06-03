@@ -35,6 +35,7 @@ use ryx_rs::migration::MigrationRunner;
 async fn run() -> ryx_rs::RyxResult<()> {
     ryx_rs::init().await?;
     MigrationRunner::new()
+        .live(true)     // apply directly — no files needed
         .model::<Post>()
         .run().await?;
     Ok(())
@@ -42,6 +43,18 @@ async fn run() -> ryx_rs::RyxResult<()> {
 ```
 
 `init()` reads a `ryx.toml` or uses the `DATABASE_URL` env var.
+
+:::tip
+For production, use **file-based YAML migrations** with the CLI:
+
+```bash
+ryx makemigrations --dir migrations/
+ryx migrate --dir migrations/
+ryx showmigrations
+```
+
+See [Migrations](../core-concepts/migrations) for the full guide.
+:::
 
 ## 3. Create Records
 
@@ -115,7 +128,7 @@ struct Post {
 #[tokio::main]
 async fn main() -> ryx_rs::RyxResult<()> {
     ryx_rs::init().await?;
-    MigrationRunner::new().model::<Post>().run().await?;
+    MigrationRunner::new().live(true).model::<Post>().run().await?;
 
     Post::objects().create()
         .set("title", "Hello Ryx")
