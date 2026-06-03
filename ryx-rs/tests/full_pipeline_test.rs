@@ -98,6 +98,7 @@ async fn full_pipeline_test() {
 
     // 1. Create tables via MigrationRunner
     MigrationRunner::new()
+        .live(true)
         .model::<Post>()
         .model::<Author>()
         .run()
