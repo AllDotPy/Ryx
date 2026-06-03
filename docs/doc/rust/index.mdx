@@ -43,6 +43,9 @@ let posts = Post::objects()
 | Create | `.create(title="...")` | `.create().set("title", "...").save()` |
 | Migrations | `MigrationRunner([Post])` | `MigrationRunner::new().model::<Post>()` |
 | Relations | `ForeignKey(Author)` | `#[relation(model = "Author", ...)]` |
+| CLI | `python -m ryx migrate` | `ryx migrate` |
+| File-based migrations | `.py` files + Autodetector | `.yaml` files + Autodetector |
+| Multi-DB routing | `Meta.database` + `model=` | `#[database("alias")]` |
 
 ## Next Steps
 
