@@ -24,6 +24,14 @@ pub trait Model: Send + Sync + 'static {
     /// Used by the migration system to compare the model's schema
     /// against the live database.
     fn field_meta() -> &'static [FieldMeta];
+    /// Database alias this model belongs to — used by the migration system
+    /// to route operations to the correct database.
+    ///
+    /// Set via `#[database("blog")]` on the struct or `#[model(database = "blog")]`.
+    /// Defaults to `"default"`.
+    fn database() -> &'static str {
+        "default"
+    }
 }
 
 /// Metadata for a foreign-key relationship.
