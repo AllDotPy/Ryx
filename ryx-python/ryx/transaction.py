@@ -42,7 +42,7 @@ from typing import Optional
 
 from ryx import ryx_core as _core
 
-logger = logging.getLogger("Ryx.transaction")
+logger = logging.getLogger("ryx.transaction")
 
 # ContextVar: holds the currently active transaction handle (if any)
 # for the current async task. This enables auto-enlistment in a future version.
