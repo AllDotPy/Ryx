@@ -10,6 +10,8 @@ Ryx includes a command-line interface for common database tasks.
 python -m ryx <command> [options]
 ```
 
+Commands use ANSI colors when the terminal supports it. Set `NO_COLOR=1` to disable, or pipe output to auto-disable.
+
 ## Commands
 
 ### migrate
@@ -21,6 +23,17 @@ python -m ryx migrate \
     --url postgres://user:pass@localhost/mydb \
     --models myapp.models
 ```
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `--url` | Database URL (or use `RYX_DATABASE_URL`) |
+| `--models` | Python dotted path to your models module |
+| `--dir` | Migrations directory (default: `migrations`) |
+| `--plan` | Show SQL without applying |
+| `--alias` | Only apply to a specific database alias |
+| `--no-interactive` | Skip interactive prompts (for CI/CD) |
 
 ### makemigrations
 
@@ -109,7 +122,7 @@ python -m ryx version
 
 The CLI reads configuration from:
 
-1. **CLI flags** — `--url`, `--models`, `--dir`
+1. **CLI flags** — `--url`, `--models`, `--dir`, `--alias`, `--no-interactive`
 2. **Environment variable** — `RYX_DATABASE_URL`
 3. **Settings module** — `ryx_settings.py` in your project
 
@@ -123,3 +136,4 @@ MIGRATIONS_DIR = "migrations/"
 ## Next Steps
 
 → **[Reference](/reference/api-reference)** — Complete API documentation
+→ **[Migrations](/core-concepts/migrations)** — Deep dive into migration internals
