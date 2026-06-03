@@ -29,8 +29,10 @@ Design notes:
 
 from __future__ import annotations
 
-# import asyncio
+import logging
 from typing import Any, Dict, List, TYPE_CHECKING
+
+logger = logging.getLogger("ryx.relations")
 
 if TYPE_CHECKING:
     from ryx.models import Model
@@ -125,6 +127,10 @@ async def apply_select_related(
 
         result.append(instance)
 
+    logger.debug(
+        "select_related %s: %d rows via LEFT JOIN on %s",
+        model.__name__, len(result), list(joins.keys()),
+    )
     return result
 
 
