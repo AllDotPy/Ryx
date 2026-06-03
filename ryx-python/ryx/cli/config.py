@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional, List
 
 from ryx.cli.config_loader import get_loader, load_config
+
+_ryx_logger = logging.getLogger("ryx")
+_logger = logging.getLogger("ryx.cli")
 
 
 @dataclass
@@ -53,6 +57,14 @@ class Config:
         config.settings = getattr(args, "settings", "ryx_settings")
         config.debug = getattr(args, "debug", False)
         config.verbose = getattr(args, "verbose", False)
+
+        # Wire CLI flags to logging levels
+        if config.debug:
+            _ryx_logger.setLevel(logging.DEBUG)
+            _logger.debug("Debug mode enabled via CLI --debug")
+        elif config.verbose:
+            _ryx_logger.setLevel(logging.INFO)
+            _logger.info("Verbose mode enabled via CLI --verbose")
 
         # Load config file if specified
         config_file = getattr(args, "config_file", None)
