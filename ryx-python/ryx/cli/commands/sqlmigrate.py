@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ryx.cli.commands.base import Command
 from ryx.cli.config_context import resolve_config
+from ryx.cli.style import PREFIX, FAIL, cyan, green, red, yellow
 
 
 class SqlMigrateCommand(Command):
@@ -35,10 +36,9 @@ class SqlMigrateCommand(Command):
         mig_file = mig_dir / f"{args.name}.py"
 
         if not mig_file.exists():
-            # Try with glob
-            matches = list(mig_dir.glob(f"{args.name}*.py"))
+            matches = sorted(mig_dir.rglob(f"{args.name}*.py"))
             if not matches:
-                print(f"[ryx] Migration not found: {args.name}")
+                print(f"{PREFIX} {FAIL} Migration not found: {red(args.name)}")
                 return 1
             mig_file = matches[0]
 
@@ -48,11 +48,10 @@ class SqlMigrateCommand(Command):
 
         from ryx.migrations.ddl import DDLGenerator
 
-        gen = DDLGenerator()  # default postgres
+        gen = DDLGenerator()
 
-        print(f"\n-- SQL for migration: {mig_file.name}\n")
+        print(f"\n{PREFIX} SQL for migration: {cyan(mig_file.name)}\n")
 
-        # Handle both new-style Migration class and old-style
         migration_ops = getattr(mod, "Migration", None)
         if migration_ops is None:
             migration_ops = getattr(mod, "operations", [])
