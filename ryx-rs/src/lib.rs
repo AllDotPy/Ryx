@@ -11,6 +11,8 @@ pub mod row;
 pub mod stream;
 pub mod transaction;
 
+use std::sync::OnceLock;
+
 // Re-export key traits and types for convenience
 pub use config::{is_initialized, RyxConfig, PoolConfigSection, MigrationsConfig};
 pub use model::{FieldMeta, Model, RelationMeta, Relationships};
@@ -19,6 +21,26 @@ pub use q::Q;
 pub use queryset::QuerySet;
 pub use row::FromRow;
 pub use transaction::transaction;
+
+/// Initialize the global `tracing` subscriber from `RYX_LOG_LEVEL`.
+///
+/// Called automatically by [`init()`]. Safe to call multiple times —
+/// only the first call takes effect.
+pub fn init_tracing() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let level =
+            std::env::var("RYX_LOG_LEVEL").unwrap_or_default();
+        if level.is_empty() {
+            return;
+        }
+        let filter = format!("ryx={}", level.to_lowercase());
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(true)
+            .try_init();
+    });
+}
 
 /// Auto-detect config and initialize the pool.
 ///
@@ -29,6 +51,8 @@ pub use transaction::transaction;
 ///
 /// No-op if already initialized or no config is found.
 pub async fn init() -> RyxResult<()> {
+    init_tracing();
+    tracing::info!("Initializing Ryx ...");
     config::init().await
 }
 
