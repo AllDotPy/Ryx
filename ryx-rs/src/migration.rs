@@ -1,8 +1,22 @@
 use ryx_backend::backends::{DecodedRow, RyxBackend};
 use ryx_common::RyxResult;
 use ryx_query::Backend;
+use serde::{Deserialize, Serialize};
 
 use crate::model::{FieldMeta, Model};
+
+pub mod operations;
+pub use operations::*;
+pub mod ddl;
+pub use ddl::*;
+#[cfg(feature = "config-yaml")]
+pub mod files;
+#[cfg(feature = "config-yaml")]
+pub use files::*;
+pub mod autodetect;
+pub use autodetect::*;
+pub mod runner;
+pub use runner::*;
 
 // ============================================================
 // State types
@@ -10,7 +24,7 @@ use crate::model::{FieldMeta, Model};
 
 /// A snapshot of a single database column, as seen in the live DB
 /// or as declared by a model.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ColumnState {
     pub name: String,
     pub db_type: String,
@@ -34,14 +48,14 @@ impl From<&FieldMeta> for ColumnState {
 }
 
 /// A snapshot of a single database table.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableState {
     pub name: String,
     pub columns: Vec<ColumnState>,
 }
 
 /// A full schema as known by the database or by the model declarations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchemaState {
     pub tables: Vec<TableState>,
 }
@@ -69,6 +83,8 @@ pub struct SchemaChange {
     pub table: String,
     pub column: Option<ColumnState>,
     pub old_column: Option<ColumnState>,
+    /// Human-readable description of the change.
+    pub description: String,
 }
 
 /// Compare two schema states and return the list of changes needed to
@@ -85,6 +101,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                 table: table.name.clone(),
                 column: None,
                 old_column: None,
+                description: format!("Create table {}", table.name),
             });
         }
     }
@@ -100,6 +117,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                 table: table.name.clone(),
                 column: Some(col.clone()),
                 old_column: None,
+                description: format!("Add column {}.{}", table.name, col.name),
             });
         }
     }
@@ -116,6 +134,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                         table: table.name.clone(),
                         column: Some(col.clone()),
                         old_column: None,
+                        description: format!("Add column {}.{}", table.name, col.name),
                     });
                 }
             }
@@ -135,6 +154,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                             table: table.name.clone(),
                             column: Some(col.clone()),
                             old_column: Some(current_col.clone()),
+                            description: format!("Alter column {}.{}", table.name, col.name),
                         });
                     }
                 }
@@ -146,188 +166,21 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
 }
 
 // ============================================================
-// DDL Generator
+// DDL Generator (thin wrapper for backward compat)
 // ============================================================
 
-fn col_type_for_backend(db_type: &str, backend: Backend) -> String {
-    match backend {
-        Backend::PostgreSQL => match db_type {
-            "BOOLEAN" => "BOOLEAN",
-            "INTEGER" => "INTEGER",
-            "BIGINT" => "BIGINT",
-            "DOUBLE PRECISION" => "DOUBLE PRECISION",
-            "REAL" => "REAL",
-            "TEXT" => "TEXT",
-            "TIMESTAMP" => "TIMESTAMP",
-            "DATE" => "DATE",
-            "TIME" => "TIME",
-            "UUID" => "UUID",
-            "JSONB" => "JSONB",
-            other => other,
-        }
-        .to_string(),
-        Backend::MySQL => match db_type {
-            "BOOLEAN" => "TINYINT(1)",
-            "INTEGER" => "INT",
-            "BIGINT" => "BIGINT",
-            "DOUBLE PRECISION" => "DOUBLE",
-            "REAL" => "FLOAT",
-            "TEXT" => "TEXT",
-            "TIMESTAMP" => "DATETIME",
-            "UUID" => "CHAR(36)",
-            "JSONB" => "JSON",
-            other => other,
-        }
-        .to_string(),
-        Backend::SQLite => match db_type {
-            "BOOLEAN" | "INTEGER" | "BIGINT" => "INTEGER",
-            "DOUBLE PRECISION" | "REAL" => "REAL",
-            "UUID" | "JSONB" => "TEXT",
-            other => other,
-        }
-        .to_string(),
-    }
-}
-
-fn build_col_sql(col: &ColumnState, backend: Backend, include_pk: bool) -> String {
-    let mut parts: Vec<String> = vec![];
-    parts.push(format!("\"{}\"", col.name));
-
-    if include_pk && col.primary_key {
-        match backend {
-            Backend::PostgreSQL => {
-                parts.push("BIGSERIAL".to_string());
-                // PK implies NOT NULL
-            }
-            Backend::MySQL => {
-                parts.push("INT AUTO_INCREMENT".to_string());
-            }
-            Backend::SQLite => {
-                parts.push("INTEGER PRIMARY KEY AUTOINCREMENT".to_string());
-                return parts.join(" ");
-            }
-        }
-    } else {
-        parts.push(col_type_for_backend(&col.db_type, backend));
-        if !col.nullable {
-            parts.push("NOT NULL".to_string());
-        }
-        if col.unique {
-            parts.push("UNIQUE".to_string());
-        }
-        if let Some(ref def) = col.default {
-            parts.push(format!("DEFAULT {def}"));
-        }
-    }
-
-    parts.join(" ")
-}
-
 /// Generate DDL statements for the given changes on the specified backend.
+///
+/// Delegates to [`DDLGenerator::generate`].
 pub fn generate_ddl(changes: &[SchemaChange], backend: Backend) -> Vec<String> {
-    let mut statements = Vec::new();
-
-    // First pass: CREATE TABLE statements
-    let create_tables: Vec<&SchemaChange> = changes
-        .iter()
-        .filter(|c| c.kind == ChangeKind::CreateTable)
-        .collect();
-
-    for change in &create_tables {
-        // Find all AddColumn for this table (they come right after the CreateTable)
-        let cols: Vec<ColumnState> = changes
-            .iter()
-            .filter(|c| {
-                c.kind == ChangeKind::AddColumn
-                    && c.table == change.table
-                    && c.column.is_some()
-            })
-            .filter_map(|c| c.column.clone())
-            .collect();
-
-        if cols.is_empty() {
-            continue;
-        }
-
-        let pk_col = cols.iter().find(|c| c.primary_key);
-        let col_sqls: Vec<String> = cols
-            .iter()
-            .map(|c| format!("  {}", build_col_sql(c, backend, true)))
-            .collect();
-        let mut sql = format!("CREATE TABLE \"{}\" (\n{}", change.table, col_sqls.join(",\n"));
-        if let Some(pk) = pk_col {
-            if !matches!(backend, Backend::SQLite) {
-                sql.push_str(&format!(",\n  PRIMARY KEY (\"{}\")", pk.name));
-            }
-        }
-        sql.push_str("\n);");
-        statements.push(sql);
-    }
-
-    // Second pass: ALTER TABLE for columns added to existing tables
-    let created_tables: Vec<&str> = create_tables.iter().map(|c| c.table.as_str()).collect();
-    for change in changes {
-        if change.kind == ChangeKind::AddColumn {
-            // Skip if part of a CREATE TABLE
-            if created_tables.contains(&change.table.as_str()) {
-                continue;
-            }
-            if let Some(ref col) = change.column {
-                let col_sql = build_col_sql(col, backend, false);
-                statements.push(format!(
-                    "ALTER TABLE \"{}\" ADD COLUMN {};",
-                    change.table, col_sql
-                ));
-            }
-        }
-    }
-
-    // Third pass: ALTER COLUMN
-    for change in changes {
-        if change.kind == ChangeKind::AlterColumn {
-            if let Some(ref col) = change.column {
-                let type_str = col_type_for_backend(&col.db_type, backend);
-                match backend {
-                    Backend::PostgreSQL => {
-                        statements.push(format!(
-                            "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" TYPE {};",
-                            change.table, col.name, type_str
-                        ));
-                        if col.nullable {
-                            statements.push(format!(
-                                "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" DROP NOT NULL;",
-                                change.table, col.name
-                            ));
-                        } else {
-                            statements.push(format!(
-                                "ALTER TABLE \"{}\" ALTER COLUMN \"{}\" SET NOT NULL;",
-                                change.table, col.name
-                            ));
-                        }
-                    }
-                    Backend::MySQL => {
-                        let nullable_sql = if col.nullable { "NULL" } else { "NOT NULL" };
-                        statements.push(format!(
-                            "ALTER TABLE \"{}\" MODIFY COLUMN \"{}\" {} {};",
-                            change.table, col.name, type_str, nullable_sql
-                        ));
-                    }
-                    Backend::SQLite => {
-                        // SQLite doesn't support ALTER COLUMN — manual rebuild required
-                    }
-                }
-            }
-        }
-    }
-
-    statements
+    DDLGenerator::new(backend).generate(changes)
 }
 
 // ============================================================
 // Introspection
 // ============================================================
 
-const MIGRATIONS_TABLE: &str = "ryx_migrations";
+pub const MIGRATIONS_TABLE: &str = "ryx_migrations";
 
 /// Introspect the live database and return its current `SchemaState`.
 pub async fn introspect_schema(
@@ -590,14 +443,14 @@ fn normalize_mysql_type(raw: &str) -> String {
 
 // ── Helpers ──────────────────────────────────────────────────
 
-fn get_text(row: &DecodedRow, key: &str) -> Option<String> {
+pub(crate) fn get_text(row: &DecodedRow, key: &str) -> Option<String> {
     row.get(key).and_then(|v| match v {
         ryx_query::ast::SqlValue::Text(s) => Some(s.clone()),
         _ => None,
     })
 }
 
-fn get_int(row: &DecodedRow, key: &str) -> Option<i64> {
+pub(crate) fn get_int(row: &DecodedRow, key: &str) -> Option<i64> {
     row.get(key).and_then(|v| match v {
         ryx_query::ast::SqlValue::Int(n) => Some(*n),
         _ => None,
@@ -605,12 +458,38 @@ fn get_int(row: &DecodedRow, key: &str) -> Option<i64> {
 }
 
 // ============================================================
-// Migration Runner
+// Utilities
 // ============================================================
 
-type ModelInfoFn = fn() -> TableState;
+/// Detect backend type from a database URL string.
+///
+/// ```ignore
+/// use ryx_rs::migration::detect_backend;
+/// use ryx_query::Backend;
+///
+/// assert_eq!(detect_backend("postgres://localhost/db"), Backend::PostgreSQL);
+/// assert_eq!(detect_backend("mysql://localhost/db"), Backend::MySQL);
+/// assert_eq!(detect_backend("sqlite::memory:"), Backend::SQLite);
+/// ```
+pub fn detect_backend(url: &str) -> Backend {
+    if url.starts_with("postgres") || url.starts_with("postgresql") {
+        Backend::PostgreSQL
+    } else if url.starts_with("mysql") || url.starts_with("mariadb") {
+        Backend::MySQL
+    } else {
+        Backend::SQLite
+    }
+}
+
+// ============================================================
+// Migration Runner (backward-compat wrapper)
+// ============================================================
 
 /// Apply migrations — introspect, diff, and execute DDL.
+///
+/// Now delegates to the file-based ``FileRunner`` from ``migration/runner``.
+/// Supports file-based migrations with per-alias tracking, recursive
+/// discovery, and an interactive fallback when no files exist.
 ///
 /// ```ignore
 /// use ryx_rs::migration::MigrationRunner;
@@ -620,95 +499,59 @@ type ModelInfoFn = fn() -> TableState;
 ///     .model::<Author>()
 ///     .run().await?;
 ///
-/// // Multi-db: target a specific database alias
+/// // Multi-db
 /// MigrationRunner::new()
 ///     .db("replica")
 ///     .model::<Post>()
 ///     .run().await?;
 /// ```
 pub struct MigrationRunner {
-    models: Vec<ModelInfoFn>,
-    db_alias: Option<String>,
+    inner: FileRunner,
 }
 
 impl MigrationRunner {
     pub fn new() -> Self {
         Self {
-            models: vec![],
-            db_alias: None,
+            inner: FileRunner::new(),
         }
     }
 
-    /// Target a specific database alias (defaults to `"default"`).
     pub fn db(mut self, alias: &str) -> Self {
-        self.db_alias = Some(alias.to_string());
+        self.inner = self.inner.db(alias);
         self
     }
 
-    /// Register a model for migration.
+    pub fn migrations_dir(mut self, dir: &str) -> Self {
+        self.inner = self.inner.migrations_dir(dir);
+        self
+    }
+
+    pub fn dry_run(mut self, dry: bool) -> Self {
+        self.inner = self.inner.dry_run(dry);
+        self
+    }
+
+    pub fn no_interactive(mut self, no: bool) -> Self {
+        self.inner = self.inner.no_interactive(no);
+        self
+    }
+
+    pub fn live(mut self, live: bool) -> Self {
+        self.inner = self.inner.live(live);
+        self
+    }
+
     pub fn model<M: Model>(mut self) -> Self {
-        self.models.push(|| {
-            let meta = M::field_meta();
-            let columns: Vec<ColumnState> = meta.iter().map(|m| m.into()).collect();
-            TableState {
-                name: M::table_name().to_string(),
-                columns,
-            }
-        });
+        self.inner = self.inner.model::<M>();
         self
     }
 
-    fn build_target(&self) -> SchemaState {
-        let mut tables = Vec::new();
-        for info_fn in &self.models {
-            tables.push(info_fn());
-        }
-        SchemaState { tables }
+    pub async fn run(self) -> RyxResult<Vec<String>> {
+        self.inner.run().await
     }
 
-    /// Diff models against the live DB and apply changes.
-    pub async fn run(self) -> RyxResult<()> {
-        let alias = self.db_alias.as_deref();
-        let pool = ryx_backend::pool::get(alias)?;
-        let target = self.build_target();
-
-        // Ensure migrations tracking table
-        let create_tracking = format!(
-            "CREATE TABLE IF NOT EXISTS \"{}\" (\
-             id INTEGER PRIMARY KEY,\
-             name TEXT NOT NULL UNIQUE,\
-             applied_at TEXT NOT NULL\
-             )",
-            MIGRATIONS_TABLE
-        );
-        let _ = pool.fetch_raw(create_tracking, None).await?;
-
-        let backend_type = ryx_backend::pool::get_backend(alias)?;
-        let current = introspect_schema(pool.as_ref(), backend_type).await?;
-        let changes = diff_states(&current, &target);
-
-        if changes.is_empty() {
-            return Ok(());
-        }
-
-        let ddl = generate_ddl(&changes, backend_type);
-
-        for stmt in &ddl {
-            pool.fetch_raw(stmt.clone(), None).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Preview the DDL that would be applied (dry-run).
     pub async fn plan(self) -> RyxResult<Vec<String>> {
-        let alias = self.db_alias.as_deref();
-        let pool = ryx_backend::pool::get(alias)?;
-        let backend_type = ryx_backend::pool::get_backend(alias)?;
-        let current = introspect_schema(pool.as_ref(), backend_type).await?;
-        let target = self.build_target();
-        let changes = diff_states(&current, &target);
-        Ok(generate_ddl(&changes, backend_type))
+        self.inner.plan().await
     }
 }
 
@@ -1026,6 +869,7 @@ mod tests {
                 table: "posts".into(),
                 column: None,
                 old_column: None,
+            description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1039,6 +883,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
+            description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1052,6 +897,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
+            description: String::new(),
             },
         ];
         let sql = generate_ddl(&changes, Backend::SQLite);
@@ -1071,6 +917,7 @@ mod tests {
                 table: "posts".into(),
                 column: None,
                 old_column: None,
+            description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1084,6 +931,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
+            description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1097,6 +945,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
+            description: String::new(),
             },
         ];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
@@ -1120,6 +969,7 @@ mod tests {
                 default: None,
             }),
             old_column: None,
+        description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
         assert_eq!(sql.len(), 1);
@@ -1148,6 +998,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
+        description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
         assert_eq!(sql.len(), 2);
@@ -1177,6 +1028,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
+        description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::MySQL);
         assert_eq!(sql.len(), 1);
@@ -1206,6 +1058,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
+        description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::SQLite);
         assert!(sql.is_empty(), "SQLite ALTER COLUMN should be no-op");
