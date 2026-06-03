@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from ryx.cli.commands.base import Command
+from ryx.cli.style import PREFIX, OK, WARN, green, red, yellow
 
 
 class MakeMigrationsCommand(Command):
@@ -49,7 +50,7 @@ class MakeMigrationsCommand(Command):
         cfg = getattr(args, "resolved_config", None) or resolve_config(args)
         models = self._load_models(args.models or cfg.models)
         if not models:
-            print("[ryx] No models found. Pass --models myapp.models or set [models].files in ryx.toml")
+            print(f"{PREFIX} {WARN} No models found. Pass {yellow('--models myapp.models')} or set [models].files in ryx.toml")
             return 1
 
         from ryx.migrations.autodetect import Autodetector
@@ -62,21 +63,21 @@ class MakeMigrationsCommand(Command):
         operations = detector.detect()
 
         if not operations:
-            print("[ryx] No changes detected.")
+            print(f"{PREFIX} No changes detected.")
             if args.check:
                 return 0
             return 0
 
         if args.check:
-            print(f"[ryx] {len(operations)} change(s) detected:")
+            print(f"{PREFIX} {red(str(len(operations)))} change(s) detected:")
             for op in operations:
-                print(f"  - {op.describe()}")
+                print(f"      {op.describe()}")
             return 1
 
         path = detector.write_migration(operations)
-        print(f"[ryx] Created migration: {path}")
+        print(f"{PREFIX} {OK} Created {green(str(path.name))}")
         for op in operations:
-            print(f"  - {op.describe()}")
+            print(f"      {op.describe()}")
 
         return 0
 
