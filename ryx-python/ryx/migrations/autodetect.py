@@ -5,32 +5,62 @@ Compares the current applied migration state (stored in the DB or in
 migration files on disk) to the current model declarations, then generates
 a new migration file with the needed changes.
 
-This is the engine behind `python -m ryx makemigrations`.
+This is the engine behind ``python -m ryx makemigrations``.
 
-Migration file format (plain Python):
+Migration files are plain Python, one file per migration:
+
   migrations/0001_initial.py
   migrations/0002_add_views_to_posts.py
   ...
 
-Each file contains a `Migration` class with:
-  - `dependencies`: list of migration names this one depends on
-  - `operations`:   list of Operation objects (CreateTable, AddField, ...)
+Each file contains a ``list`` of Operation objects (or a ``Migration`` class
+with an ``operations`` attribute). Operations now embed the **Model class**
+for automatic multi-database routing:
 
-Operations:
-  CreateTable(name, fields)
-  AddField(model, name, field_deconstruct_dict)
-  RemoveField(model, name)          # destructive — not auto-generated
-  AlterField(model, name, field)
-  CreateIndex(model, index)
-  DeleteIndex(model, index_name)
-  RunSQL(sql, reverse_sql)          # for raw migrations
+.. code-block:: python
 
-Usage:
-  detector = Autodetector(models=[Post, Author], migrations_dir="migrations/")
-  changes = detector.detect()
-  if changes:
-      path = detector.write_migration(changes)
-      print(f"Created {path}")
+    from myapp.models import Author
+    from ryx.migrations.autodetect import CreateTable, ColumnState
+
+    Migration = [
+        CreateTable(
+            table='authors',
+            columns=[
+                ColumnState(name='id', db_type='INTEGER',
+                            primary_key=True, unique=True),
+                ColumnState(name='name', db_type='VARCHAR(100)'),
+            ],
+            model=Author,
+        ),
+    ]
+
+Operation types:
+
+  ==================  ===================================================
+  CreateTable         ``(table, columns, model=None)``
+  AddField            ``(table, column, model=None)``
+  RemoveField         ``(table, column)``         (destructive, not auto-generated)
+  AlterField          ``(table, old_col, new_col, model=None)``
+  CreateIndex         ``(table, name, fields, unique, model=None)``
+  DeleteIndex         ``(table, index_name)``
+  RunSQL              ``(sql, reverse_sql)``
+  ==================  ===================================================
+
+The ``model`` parameter stores a **class reference** (not a string). The
+runner reads ``model._meta.database`` to route each operation to the correct
+database alias. ``RunSQL`` and operations without a model are applied to all
+aliases (legacy fallback).
+
+Usage::
+
+    from myapp.models import Post, Author
+    from ryx.migrations.autodetect import Autodetector
+
+    detector = Autodetector(models=[Post, Author], migrations_dir="migrations/")
+    changes = detector.detect()
+    if changes:
+        path = detector.write_migration(changes)
+        print(f"Created {path}")
 """
 
 from __future__ import annotations
