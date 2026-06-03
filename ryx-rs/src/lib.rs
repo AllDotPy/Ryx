@@ -34,7 +34,11 @@ pub fn init_tracing() {
         if level.is_empty() {
             return;
         }
-        let filter = format!("ryx={}", level.to_lowercase());
+        let lower = level.to_lowercase();
+        if lower == "no_log" || lower == "off" || lower == "silent" {
+            return;
+        }
+        let filter = format!("ryx={}", lower);
         let _ = tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_target(true)

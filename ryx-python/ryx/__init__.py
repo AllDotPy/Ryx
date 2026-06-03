@@ -8,7 +8,11 @@ import os
 # Configure Ryx logging from RYX_LOG_LEVEL env var
 _ryx_logger = _logging.getLogger("ryx")
 _ryx_log_level = os.environ.get("RYX_LOG_LEVEL", "").strip().upper()
-if _ryx_log_level:
+if _ryx_log_level in ("NO_LOG", "OFF", "SILENT"):
+    _ryx_logger.disabled = True
+    _ryx_logger.propagate = False
+    _ryx_logger.addHandler(_logging.NullHandler())
+elif _ryx_log_level:
     _ryx_log_level_num = getattr(_logging, _ryx_log_level, _logging.INFO)
     _ryx_log_handler = _logging.StreamHandler()
     _ryx_log_handler.setFormatter(
