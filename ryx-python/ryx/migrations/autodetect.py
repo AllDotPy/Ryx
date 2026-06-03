@@ -63,12 +63,7 @@ class CreateTable:
         return f"Create table '{self.table}'"
 
     def to_python(self) -> str:
-        cols = ", ".join(
-            f'ColumnState(name={c.name!r}, db_type={c.db_type!r}, '
-            f'nullable={c.nullable!r}, primary_key={c.primary_key!r}, '
-            f'unique={c.unique!r})'
-            for c in self.columns
-        )
+        cols = ", ".join(_column_state_repr(c) for c in self.columns)
         return f"    CreateTable(table={self.table!r}, columns=[{cols}]),"
 
 
@@ -85,12 +80,9 @@ class AddField:
         return f"Add field '{self.column.name}' to '{self.table}'"
 
     def to_python(self) -> str:
-        c = self.column
         return (
             f"    AddField(table={self.table!r}, "
-            f"column=ColumnState(name={c.name!r}, db_type={c.db_type!r}, "
-            f"nullable={c.nullable!r}, primary_key={c.primary_key!r}, "
-            f"unique={c.unique!r})),"
+            f"column={_column_state_repr(self.column)}),"
         )
 
 
@@ -101,21 +93,22 @@ class AddField:
 class AlterField:
     """Change a column's type or constraints."""
     table: str
-    old_col: ColumnState
     new_col: ColumnState
+    old_col: Optional[ColumnState] = None
 
     def describe(self) -> str:
+        old = self.old_col
+        old_info = f"{old.db_type} → " if old else ""
         return (
-            f"Alter field '{self.old_col.name}' on '{self.table}': "
-            f"{self.old_col.db_type} → {self.new_col.db_type}"
+            f"Alter field '{self.new_col.name}' on '{self.table}': "
+            f"{old_info}{self.new_col.db_type}"
         )
 
     def to_python(self) -> str:
-        nc = self.new_col
+        oc_repr = f", old_col={_column_state_repr(self.old_col)}" if self.old_col else ""
         return (
             f"    AlterField(table={self.table!r}, "
-            f"new_col=ColumnState(name={nc.name!r}, db_type={nc.db_type!r}, "
-            f"nullable={nc.nullable!r})),"
+            f"new_col={_column_state_repr(self.new_col)}{oc_repr}),"
         )
 
 
@@ -172,6 +165,59 @@ class MigrationFile:
 
 
 ###
+##      COLUMN SERIALIZATION
+####
+def _column_state_repr(c: ColumnState) -> str:
+    """Return a Python repr string for a ColumnState, including all fields."""
+    parts = [f"name={c.name!r}", f"db_type={c.db_type!r}"]
+    if c.nullable is not True:
+        parts.append(f"nullable={c.nullable!r}")
+    if c.primary_key:
+        parts.append(f"primary_key={c.primary_key!r}")
+    if c.unique:
+        parts.append(f"unique={c.unique!r}")
+    if c.default is not None:
+        parts.append(f"default={c.default!r}")
+    return f"ColumnState({', '.join(parts)})"
+
+
+###
+##      STANDALONE HELPERS  (shared with runner)
+####
+def load_migration_file(path: Path) -> MigrationFile:
+    """Import and return the Migration class from a migration file path."""
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cls = mod.Migration
+    return MigrationFile(
+        name=path.stem,
+        dependencies=cls.dependencies,
+        operations=cls.operations,
+    )
+
+
+def apply_migration_to_state(mf: MigrationFile, state: SchemaState) -> None:
+    """Apply the operations in a MigrationFile to a SchemaState."""
+    for op in mf.operations:
+        if isinstance(op, CreateTable):
+            table = TableState(name=op.table)
+            for col in op.columns:
+                table.add_column(col)
+            state.add_table(table)
+
+        elif isinstance(op, AddField):
+            if state.has_table(op.table):
+                state.tables[op.table].add_column(op.column)
+
+        elif isinstance(op, AlterField):
+            if state.has_table(op.table) and state.tables[op.table].has_column(op.new_col.name):
+                col = state.tables[op.table].columns[op.new_col.name]
+                col.db_type = op.new_col.db_type
+                col.nullable = op.new_col.nullable
+
+
+###
 ##      AUTODETECTOR
 ####
 class Autodetector:
@@ -182,6 +228,8 @@ class Autodetector:
         migrations_dir: Path to the migrations directory (relative or absolute).
                         Created if it doesn't exist.
         app_label:      Optional app namespace prefix for migration names.
+        alias:          Optional database alias. If set, files go in
+                        ``{migrations_dir}/{alias}/``.
     """
 
     def __init__(
@@ -189,9 +237,12 @@ class Autodetector:
         models: List[type],
         migrations_dir: str = "migrations",
         app_label: str = "",
+        alias: Optional[str] = None,
     ) -> None:
         self._models = models
-        self._migrations_dir = Path(migrations_dir)
+        self._alias = alias
+        base = Path(migrations_dir)
+        self._migrations_dir = base / alias if alias else base
         self._app_label = app_label
 
     # Public API
@@ -279,8 +330,8 @@ class Migration:
 
         for mf in migration_files:
             try:
-                migration = self._load_migration_file(mf)
-                self._apply_migration_to_state(migration, state)
+                migration = load_migration_file(mf)
+                apply_migration_to_state(migration, state)
             except Exception as e:
                 import warnings
                 warnings.warn(
@@ -289,35 +340,6 @@ class Migration:
                 )
 
         return state
-
-    def _load_migration_file(self, path: Path) -> MigrationFile:
-        """Import and return the Migration class from a migration file."""
-        spec = importlib.util.spec_from_file_location(path.stem, path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        cls = mod.Migration
-        return MigrationFile(
-            name = path.stem,
-            dependencies = cls.dependencies,
-            operations = cls.operations,
-        )
-
-    def _apply_migration_to_state(self, mf: MigrationFile, state: SchemaState) -> None:
-        """Apply the operations in a MigrationFile to a SchemaState."""
-        for op in mf.operations:
-            if isinstance(op, CreateTable):
-                table = TableState(name=op.table)
-                for col in op.columns:
-                    table.add_column(col)
-                state.add_table(table)
-
-            elif isinstance(op, AddField):
-                if state.has_table(op.table):
-                    state.tables[op.table].add_column(op.column)
-
-            elif isinstance(op, AlterField):
-                if state.has_table(op.table) and state.tables[op.table].has_column(op.new_col.name):
-                    state.tables[op.table].columns[op.new_col.name] = op.new_col
 
     def _changes_to_operations(
         self,
@@ -344,8 +366,8 @@ class Migration:
                 if change.old_state and change.new_state:
                     ops.append(AlterField(
                         table = change.table,
-                        old_col = change.old_state,
                         new_col = change.new_state,
+                        old_col = change.old_state,
                     ))
 
         # Also add index creation operations for all models
