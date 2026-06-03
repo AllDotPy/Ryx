@@ -1,5 +1,6 @@
 pub mod agg;
 pub mod cache;
+pub mod cli;
 pub mod config;
 pub mod into_sql;
 pub mod migration;
