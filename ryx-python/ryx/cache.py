@@ -34,10 +34,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from typing import Any, Optional
+
+logger = logging.getLogger("ryx.cache")
 
 
 ####
@@ -175,6 +178,10 @@ def configure_cache(
     global _cache_backend, _auto_invalidate
     _cache_backend   = backend
     _auto_invalidate = auto_invalidate
+    logger.info(
+        "Cache configured: backend=%s, auto_invalidate=%s",
+        type(backend).__name__, auto_invalidate,
+    )
 
     if auto_invalidate:
         _register_invalidation_signals()
@@ -215,6 +222,7 @@ async def invalidate(key: str) -> None:
     """
     if _cache_backend:
         await _cache_backend.delete(key)
+        logger.debug("Cache invalidate: %s", key)
 
 
 async def invalidate_model(model: type) -> None:
@@ -231,12 +239,14 @@ async def invalidate_model(model: type) -> None:
     keys    = await _cache_backend.keys(prefix)
     if keys:
         await _cache_backend.delete_many(keys)
+        logger.debug("Cache invalidate model %s: %d keys", model.__name__, len(keys))
 
 
 async def invalidate_all() -> None:
     """Clear the entire cache."""
     if _cache_backend:
         await _cache_backend.clear()
+        logger.debug("Cache invalidate all")
 
 
 ####
@@ -269,9 +279,11 @@ class CachedQueryMixin:
         # Try cache first
         cached = await backend.get(key)
         if cached is not None:
+            logger.debug("Cache HIT: %s", key)
             return cached
 
         # Cache miss → hit DB
+        logger.debug("Cache MISS: %s", key)
         result = await super()._execute()  # type: ignore[misc]
 
         # Serialise model instances to plain dicts for caching
