@@ -41,6 +41,8 @@ from ryx.migrations.state import (
 )
 from ryx.migrations.ddl import DDLGenerator, detect_backend
 
+from ryx.cli.style import PREFIX, OK, FAIL, WARN, green, yellow, red, cyan, magenta
+
 logger = logging.getLogger("ryx.migrations")
 MIGRATIONS_TABLE = "ryx_migrations"
 
@@ -88,10 +90,14 @@ class MigrationRunner:
     async def migrate(self) -> List[SchemaChange]:
         """Detect and apply all pending schema changes across configured databases.
 
-        Migration strategy (in order of preference):
-          1. File-based migrations — reads ``.py`` files from ``{migrations_dir}/{alias}/``,
-             applies pending ones, tracks in ``ryx_migrations`` table.
-          2. No files found — interactive prompt offering live-DDL, auto-generate, or manual.
+        Strategy:
+          1. Discover ALL migration files recursively under ``{migrations_dir}/``,
+             sorted globally by numeric prefix.
+          2. For each DB alias, filter operations to only those whose table
+             routes to this alias (via ``Meta.database`` or ``Router``).
+          3. Apply only relevant operations per alias; track each file as applied
+             per-alias in ``ryx_migrations``.
+          4. If no migration files exist at all, offer interactive fallback.
 
         Returns:
             A list of all SchemaChange objects applied across databases.
@@ -99,6 +105,9 @@ class MigrationRunner:
         from ryx.router import get_router
 
         router = get_router()
+
+        # Discover all migration files (flat, recursive)
+        all_migration_files = self._discover_all_migration_files()
 
         all_applied_changes: List[SchemaChange] = []
         aliases = _core.list_aliases()
@@ -130,25 +139,11 @@ class MigrationRunner:
                 logger.debug("No models mapped to database %s, skipping.", alias)
                 continue
 
-            # Determine migration directory for this alias
-            #   Priority: {migrations_dir}/{alias}/  (multi-DB)  →  {migrations_dir}/  (single-DB, backward compat)
-            alias_specific = self._migrations_dir / alias
-            if alias_specific.exists() and list(alias_specific.glob("[0-9]*.py")):
-                alias_dir = alias_specific
-                has_alias_subdir = True
-            else:
-                alias_dir = self._migrations_dir
-                has_alias_subdir = False
-
-            migration_files = sorted(alias_dir.glob("[0-9]*.py")) if alias_dir.exists() else []
-
-            if migration_files:
-                changes = await self._apply_file_migrations(alias, migration_files)
+            if all_migration_files:
+                changes = await self._apply_file_migrations(alias, all_migration_files)
                 all_applied_changes.extend(changes)
             elif models_for_db:
-                await self._handle_no_migration_files(
-                    alias, alias_dir, models_for_db, has_alias_subdir,
-                )
+                await self._handle_no_migration_files(alias, models_for_db)
 
             # Always apply indexes, constraints, M2M tables
             if not self._dry_run:
@@ -157,6 +152,9 @@ class MigrationRunner:
         logger.info("Multi-DB migration complete.")
         return all_applied_changes
 
+    # ------------------------------------------------------------------
+    #  MODEL → ALIAS ROUTING HELPERS
+    # ------------------------------------------------------------------
     def _filter_models_for_db(self, alias: str, router) -> list:
         """Return models whose route maps to the given database alias."""
         models = []
@@ -170,33 +168,90 @@ class MigrationRunner:
                 models.append(model)
         return models
 
+    def _operation_is_relevant(self, op, alias: str) -> bool:
+        """Return True if the operation should be executed for *alias*.
+
+        ``RunSQL`` always executes.  Table-level ops (CreateTable, AddField, …)
+        check ``op.model`` (the Model class itself, injected at migration-file
+        generation time): if ``model._meta.database`` matches *alias*,
+        the operation is relevant.
+        """
+        if isinstance(op, RunSQL):
+            return True
+        model = getattr(op, "model", None)
+        if model is None:
+            return True
+        db = getattr(model._meta, "database", None)
+        return db == alias or (db is None and alias == "default")
+
     # ------------------------------------------------------------------
-    #  FILE-BASED MIGRATIONS
+    #  DISCOVER ALL MIGRATION FILES (flat, recursive)
+    # ------------------------------------------------------------------
+    def _discover_all_migration_files(self) -> List[Path]:
+        """Recursively find all ``[0-9]*.py`` files under ``migrations/``.
+
+        Returns a globally sorted list (by numeric prefix), ignoring ``__pycache__``.
+        """
+        if not self._migrations_dir.exists():
+            return []
+        all_files: List[Path] = []
+        for f in self._migrations_dir.rglob("[0-9]*.py"):
+            # Skip files in __pycache__
+            if "__pycache__" in f.parts:
+                continue
+            all_files.append(f)
+        all_files.sort(key=lambda p: p.stem)
+        logger.debug("Discovered %d migration file(s)", len(all_files))
+        return all_files
+
+    # ------------------------------------------------------------------
+    #  FILE-BASED MIGRATIONS  (flat + per-alias operation routing)
     # ------------------------------------------------------------------
     async def _apply_file_migrations(
         self,
         alias: str,
-        migration_files: list,
+        all_migration_files: List[Path],
     ) -> list:
-        """Apply pending migration files to *alias*, tracking in ``ryx_migrations``.
+        """Apply pending migration files to *alias*.
+
+        Each file's operations are filtered via ``model_path`` to only
+        include those relevant to *alias*.  Tracks applied files per-alias
+        in ``ryx_migrations`` using the ``alias|file_stem`` key.
 
         Returns list of SchemaChange objects for reporting.
         """
         await self._ensure_migrations_table(alias)
         applied: Set[str] = await self._get_applied_migrations(alias)
 
-        pending = [f for f in migration_files if f.stem not in applied]
+        pending = [f for f in all_migration_files if f.stem not in applied]
         if not pending:
             logger.info("Database %s is up to date.", alias)
             return []
 
         changes: List[SchemaChange] = []
         for mf_path in pending:
-            logger.info("Applying: %s to %s", mf_path.stem, alias)
-            print(f"[ryx] Applying {mf_path.stem} to {alias} ...")
+            migration = load_migration_file(mf_path)
+
+            # Filter to only operations relevant to this alias
+            relevant_ops = [
+                op for op in migration.operations
+                if self._operation_is_relevant(op, alias)
+            ]
+
+            if not relevant_ops:
+                logger.debug(
+                    "Skipping %s for %s — no relevant operations",
+                    mf_path.stem, alias,
+                )
+                await self._record_migration(alias, mf_path.stem)
+                continue
+
+            logger.info("Applying: %s to %s (%d op(s))", mf_path.stem, alias, len(relevant_ops))
+            label = f"{mf_path.stem}"
+            print(f"{PREFIX}  {cyan(label)} → {magenta(alias)} ({len(relevant_ops)} op(s))")
 
             if self._dry_run:
-                print(f"  Would apply: {mf_path.stem}")
+                print(f"       {yellow('(dry-run)')} would apply: {cyan(label)}")
                 changes.append(SchemaChange(
                     kind=ChangeKind.CREATE_TABLE,
                     table=mf_path.stem,
@@ -204,8 +259,7 @@ class MigrationRunner:
                 ))
                 continue
 
-            migration = load_migration_file(mf_path)
-            for op in migration.operations:
+            for op in relevant_ops:
                 sql = self._operation_to_ddl(op)
                 if sql:
                     logger.debug("SQL: %s", sql.strip())
@@ -219,7 +273,7 @@ class MigrationRunner:
                         raise
 
             await self._record_migration(alias, mf_path.stem)
-            print(f"[ryx]  ✓ {mf_path.stem} applied")
+            print(f"{PREFIX}  {OK} {green(mf_path.stem)}")
 
         return changes
 
@@ -248,34 +302,32 @@ class MigrationRunner:
         return None
 
     # ------------------------------------------------------------------
-    #  INTERACTIVE FALLBACK  (no migration files found)
+    #  INTERACTIVE FALLBACK  (no migration files exist at all)
     # ------------------------------------------------------------------
     async def _handle_no_migration_files(
-        self, alias: str, alias_dir: Path, models: list, has_alias_subdir: bool = False,
+        self, alias: str, models: list,
     ) -> None:
-        """Called when no migration files exist for *alias*.
+        """Called when no migration files exist anywhere under ``migrations/``.
 
         Offers the user an interactive choice, or errors if ``--no-interactive``.
         """
         if self._no_interactive:
-            print(
-                f"[ryx] No migration files for '{alias}' and --no-interactive is set.\n"
-                f"  Run 'ryx makemigrations --models <module> --alias {alias}' first."
-            )
+            print(f"{PREFIX} {WARN} No migration files exist and {yellow('--no-interactive')} is set.")
+            print(f"       Run {yellow('ryx makemigrations --models <module>')} first")
             return
 
         print(
-            f"\n[ryx] No migration files found for database '{alias}'.\n"
-            f"  {len(models)} model(s) are not yet tracked."
+            f"\n{PREFIX} {yellow('No migration files exist')} for database {magenta(alias)}"
         )
+        print(f"       {len(models)} model(s) are not yet tracked.")
         print()
-        print("  [L] Live DDL — apply changes directly (development only)")
-        print("  [A] Auto-generate migration files, then migrate")
-        print("  [M] Manual — run 'ryx makemigrations --alias <alias>' first")
-        print("  [S] Skip this database for now")
+        print(f"  {green('L')}ive DDL — apply changes directly (development only)")
+        print(f"  {green('A')}uto-generate migration files, then migrate")
+        print(f"  {green('M')}anual — run {yellow('ryx makemigrations')} first")
+        print(f"  {green('S')}kip this database for now")
         print()
 
-        choice = input("[ryx] Choice (L/A/M/S) [S]: ").strip().upper() or "S"
+        choice = input(f"  {PREFIX} Choice [S]: ").strip().upper() or "S"
 
         if choice == "L":
             logger.info("Applying live DDL for %s ...", alias)
@@ -283,25 +335,23 @@ class MigrationRunner:
             target_state = project_state_from_models(models)
             changes = diff_states(current_state, target_state)
             if changes:
-                print(f"[ryx] Applying {len(changes)} live change(s) to {alias}")
+                print(f"{PREFIX}  {green(str(len(changes)))} live change(s) → {magenta(alias)}")
                 await self._apply_changes(changes, target_state, alias)
 
         elif choice == "A":
             logger.info("Auto-generating migration files for %s ...", alias)
             from ryx.migrations.autodetect import Autodetector
 
-            alias_arg = alias if has_alias_subdir or alias != "default" else None
             detector = Autodetector(
                 models=models,
                 migrations_dir=str(self._migrations_dir),
-                alias=alias_arg,
             )
             operations = detector.detect()
             if not operations:
-                print("[ryx] No changes detected.")
+                print(f"{PREFIX}  No changes detected.")
                 return
             path = detector.write_migration(operations)
-            print(f"[ryx] Created migration: {path}")
+            print(f"{PREFIX} {OK} Created {green(path.name)}")
 
             migration = load_migration_file(path)
             await self._ensure_migrations_table(alias)
@@ -311,22 +361,26 @@ class MigrationRunner:
                     from ryx.executor_helpers import raw_execute
                     await raw_execute(sql, alias=alias)
             await self._record_migration(alias, path.stem)
-            print(f"[ryx]  ✓ {path.stem} applied")
+            print(f"{PREFIX}  {OK} {green(path.stem)} applied")
 
         elif choice == "M":
-            alias_flag = f" --alias {alias}" if alias != "default" else ""
-            print(f"[ryx] Run: ryx makemigrations --models <module>{alias_flag}")
-            print(f"[ryx] Then run 'ryx migrate' again.")
+            print(f"{PREFIX}  Run {yellow('ryx makemigrations --models <module>')}")
+            print(f"       Then run {yellow('ryx migrate')} again")
 
         else:
-            print(f"[ryx] Skipping database '{alias}'.")
+            print(f"{PREFIX}  {yellow('Skipped')} database {magenta(alias)}")
 
     # ------------------------------------------------------------------
     #  MIGRATION TRACKING TABLE
     # ------------------------------------------------------------------
     async def _get_applied_migrations(self, alias: str) -> Set[str]:
-        """Return set of migration names already recorded in the tracking table."""
+        """Return set of migration file stems already applied for this alias.
+
+        Uses ``alias|stem`` as the tracking key.  Falls back to bare stems
+        for backward compatibility with the old format.
+        """
         applied: Set[str] = set()
+        prefix = f"{alias}|"
         try:
             from ryx.executor_helpers import raw_fetch
 
@@ -335,24 +389,32 @@ class MigrationRunner:
                 alias=alias,
             )
             for row in rows:
-                applied.add(row.get("name", ""))
+                name: str = row.get("name", "")
+                if name.startswith(prefix):
+                    applied.add(name[len(prefix):])
+                elif "|" not in name:
+                    applied.add(name)  # old-style bare stem
         except Exception:
             pass
         return applied
 
-    async def _record_migration(self, alias: str, name: str) -> None:
-        """Insert a row into the tracking table after a migration is applied."""
+    async def _record_migration(self, alias: str, stem: str) -> None:
+        """Insert a row into the tracking table for an applied migration.
+
+        Stores ``alias|stem`` as the name to allow per-alias tracking.
+        """
         from ryx.executor_helpers import raw_execute
 
         ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        qualified = f"{alias}|{stem}"
         sql = (
             f"INSERT INTO {MIGRATIONS_TABLE} (name, applied_at) "
-            f"VALUES ('{name}', '{ts}')"
+            f"VALUES ('{qualified}', '{ts}')"
         )
         try:
             await raw_execute(sql, alias=alias)
         except Exception as e:
-            logger.warning("Could not record migration '%s': %s", name, e)
+            logger.warning("Could not record migration '%s': %s", stem, e)
 
     # Schema introspection
     async def _introspect_schema(self, alias: str) -> SchemaState:
