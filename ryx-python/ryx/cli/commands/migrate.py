@@ -38,6 +38,11 @@ class MigrateCommand(Command):
             metavar="ALIAS",
             help="Run migrations for a specific database alias",
         )
+        parser.add_argument(
+            "--no-interactive",
+            action="store_true",
+            help="Fail if no migration files found (for CI)",
+        )
 
     async def execute(self, args: argparse.Namespace) -> int:
         cfg = getattr(args, "resolved_config", None)
@@ -66,6 +71,8 @@ class MigrateCommand(Command):
             models,
             dry_run=getattr(args, "dry_run", False),
             alias_filter=getattr(args, "database", None) or (cfg.db_alias if cfg else None),
+            migrations_dir=getattr(args, "dir", "migrations"),
+            no_interactive=getattr(args, "no_interactive", False),
         )
 
         if getattr(args, "plan", False):
