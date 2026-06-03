@@ -1014,13 +1014,18 @@ fn bulk_update<'py>(
 
 fn _init_tracing() {
     let level = std::env::var("RYX_LOG_LEVEL").unwrap_or_default();
-    if !level.is_empty() {
-        let filter = format!("ryx={}", level.to_lowercase());
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_target(true)
-            .try_init();
+    if level.is_empty() {
+        return;
     }
+    let lower = level.to_lowercase();
+    if lower == "no_log" || lower == "off" || lower == "silent" {
+        return;
+    }
+    let filter = format!("ryx={}", lower);
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .try_init();
 }
 
 #[pymodule]
