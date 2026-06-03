@@ -25,6 +25,7 @@ Design notes:
 
 from __future__ import annotations
 
+import logging
 from typing import List, Sequence, Type, TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -32,6 +33,8 @@ if TYPE_CHECKING:
 
 from ryx import ryx_core as _core
 from ryx.router import get_router
+
+logger = logging.getLogger("ryx.bulk")
 
 
 def _resolve_alias(model: "Model") -> Optional[str]:
@@ -95,6 +98,11 @@ async def bulk_create(
         Connect to ``pre_bulk_create`` / ``post_bulk_create`` if needed.
     """
     from ryx.models import _apply_auto_timestamps
+
+    logger.info(
+        "bulk_create %s: %d rows (batch_size=%d, validate=%s, ignore_conflicts=%s)",
+        model.__name__, len(instances), batch_size, validate, ignore_conflicts,
+    )
 
     if not instances:
         return list(instances)
@@ -271,6 +279,11 @@ async def bulk_update(
     Signals:
         Does NOT fire pre_save / post_save signals (for performance).
     """
+    logger.info(
+        "bulk_update %s: %d rows, fields=%s (batch_size=%d)",
+        model.__name__, len(instances), fields, batch_size,
+    )
+
     if not instances or not fields:
         return 0
 
@@ -352,6 +365,11 @@ async def bulk_delete(
     Signals:
         Does NOT fire pre_delete / post_delete signals.
     """
+    logger.info(
+        "bulk_delete %s: %d rows (batch_size=%d)",
+        model.__name__, len(instances), batch_size,
+    )
+
     pk_field = model._meta.pk_field
     if not pk_field:
         raise ValueError(f"{model.__name__} has no primary key")
