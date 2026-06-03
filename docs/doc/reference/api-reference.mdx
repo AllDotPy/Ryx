@@ -220,14 +220,35 @@ runner = MigrationRunner([Model1, Model2])
 await runner.migrate()
 await runner.migrate(dry_run=True)
 
+# Multi-database: filter by alias
+await runner.migrate(alias_filter="blog")
+
+# Non-interactive (CI/CD)
+runner = MigrationRunner([Model1, Model2], no_interactive=True)
+await runner.migrate()
+
+# DDL without executing
 stmts = generate_schema_ddl([Model1], backend="postgres")
+```
+
+Migration operations embed the Model class for automatic database routing:
+
+```python
+from myapp.models import Author
+from ryx.migrations.autodetect import CreateTable, AddField
+
+CreateTable(
+    table='authors',
+    columns=[ColumnState(name='id', db_type='INTEGER', primary_key=True, unique=True)],
+    model=Author,  # routes to Author._meta.database
+)
 ```
 
 ## CLI
 
 ```bash
-python -m ryx migrate --url ... --models ...
-python -m ryx makemigrations --models ... --dir ...
+python -m ryx migrate --url ... --models ... [--alias blog] [--no-interactive]
+python -m ryx makemigrations --models ... --dir ... [--check]
 python -m ryx showmigrations --url ... --dir ...
 python -m ryx sqlmigrate <name> --dir ...
 python -m ryx flush --models ... --url ... --yes
