@@ -13,6 +13,7 @@ use std::sync::{OnceLock, RwLock};
 // Removed unused SqlValue import
 use crate::backend::Backend;
 use crate::errors::{QueryError, QueryResult};
+use tracing::debug;
 
 // Re-export submodules
 pub use crate::lookups::common_lookups;
@@ -122,10 +123,13 @@ pub fn register_custom(
         .write()
         .map_err(|e| QueryError::Internal(format!("Registry lock poisoned: {e}")))?;
 
+    let name = name.into();
+    let sql_template = sql_template.into();
+    debug!("Register custom lookup: {} = {}", name, sql_template);
     guard.custom.insert(
-        name.into(),
+        name,
         PythonLookup {
-            sql_template: sql_template.into(),
+            sql_template,
         },
     );
 
