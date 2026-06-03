@@ -1012,8 +1012,21 @@ fn bulk_update<'py>(
 // Module definition
 // ###
 
+fn _init_tracing() {
+    let level = std::env::var("RYX_LOG_LEVEL").unwrap_or_default();
+    if !level.is_empty() {
+        let filter = format!("ryx={}", level.to_lowercase());
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_target(true)
+            .try_init();
+    }
+}
+
 #[pymodule]
 fn ryx_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    _init_tracing();
+
     lookups::init_registry();
 
     let mut builder = tokio::runtime::Builder::new_multi_thread();
