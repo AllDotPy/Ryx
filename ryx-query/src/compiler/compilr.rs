@@ -17,6 +17,7 @@ use crate::lookups::date_lookups as date;
 use crate::lookups::json_lookups as json;
 use crate::lookups::{self, LookupContext};
 use crate::symbols::{GLOBAL_INTERNER, Symbol};
+use tracing::debug;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use smallvec::SmallVec;
@@ -144,6 +145,7 @@ pub struct CompiledQuery {
 }
 
 pub fn compile(node: &QueryNode) -> QueryResult<CompiledQuery> {
+    debug!(?node.operation, table = ?GLOBAL_INTERNER.resolve(node.table), "Compiling query");
     let mut values: SmallVec<[SqlValue; 8]> = SmallVec::new();
     let plan_hash = compute_plan_hash(node);
     let mut node_column_names: Option<Vec<String>> = None;
