@@ -10,9 +10,12 @@ These are internal helpers — not part of the public API.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, List
 
 from ryx import ryx_core as _core
+
+logger = logging.getLogger("ryx.pool")
 
 
 async def execute_with_params(sql: str, values: List[Any]) -> int:
@@ -25,6 +28,7 @@ async def execute_with_params(sql: str, values: List[Any]) -> int:
     Returns:
         Number of rows affected.
     """
+    logger.debug("EXEC: %s [%d params]", sql[:120], len(values))
     return await _core.execute_with_params(sql, values)
 
 
@@ -38,4 +42,5 @@ async def fetch_with_params(sql: str, values: List[Any]) -> list:
     Returns:
         List of row dicts.
     """
+    logger.debug("FETCH: %s [%d params]", sql[:120], len(values))
     return await _core.fetch_with_params(sql, values)
