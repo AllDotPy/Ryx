@@ -10,3 +10,4 @@ sqlx = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }
