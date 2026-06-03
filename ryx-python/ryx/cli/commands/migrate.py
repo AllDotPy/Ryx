@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import sys
-from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from ryx.cli.commands.base import Command
 from ryx.cli.config import get_config, Config
+from ryx.cli.style import PREFIX, OK, FAIL, cyan, green
 
 
 class MigrateCommand(Command):
@@ -57,7 +56,7 @@ class MigrateCommand(Command):
 
         # Masking the first URL for the log
         first_url = list(urls.values())[0] if isinstance(urls, dict) else urls
-        print(f"[ryx] Connecting to {self._mask_url(first_url)} ...")
+        print(f"{PREFIX} Connecting to {cyan(self._mask_url(first_url))} ...")
 
         import ryx
 
@@ -75,20 +74,13 @@ class MigrateCommand(Command):
             no_interactive=getattr(args, "no_interactive", False),
         )
 
-        if getattr(args, "plan", False):
-            # For plan, we just want to see what would happen
-            # In a real implementation, this would be a separate runner method
-            print("[ryx] --plan is active. Running in dry-run mode...")
-            # We could force dry_run = True here
-
         changes = await runner.migrate()
 
         if changes:
-            print(
-                f"[ryx] Applied {len(changes)} change(s) across configured databases."
-            )
+            count = green(str(len(changes)))
+            print(f"{PREFIX} {OK} Applied {count} change(s)")
         else:
-            print("[ryx] No pending migrations.")
+            print(f"{PREFIX} No pending migrations")
 
         return 0
 
@@ -136,11 +128,12 @@ class MigrateCommand(Command):
         return re.sub(r"(:)[^:@/]+(@)", r"\1***\2", url)
 
     def _print_missing_url(self) -> None:
+        from ryx.cli.style import FAIL, yellow, cyan
         print(
-            "[ryx] No database URL found.\n"
-            "  Set RYX_DATABASE_URL environment variable, or\n"
-            "  pass --url postgres://user:pass@host/db, or\n"
-            "  create ryx_settings.py with DATABASE_URL = '...'"
+            f"{PREFIX} {FAIL} No database URL found.\n"
+            f"  Set {cyan('RYX_DATABASE_URL')} environment variable, or\n"
+            f"  pass {yellow('--url postgres://user:pass@host/db')}, or\n"
+            f"  create {cyan('ryx_settings.py')} with {cyan('DATABASE_URL')} = '...'"
         )
 
 
