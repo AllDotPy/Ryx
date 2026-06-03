@@ -45,7 +45,7 @@ import logging
 import weakref
 from typing import Any, Callable, Optional, Type
 
-logger = logging.getLogger("Rxy.signals")
+logger = logging.getLogger("ryx.signals")
 
 
 ####
