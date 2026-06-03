@@ -2,7 +2,21 @@ from __future__ import annotations
 
 # Import the compiled Rust extension directly to avoid circular import
 import ryx.ryx_core as _core
+import logging as _logging
 import os
+
+# Configure Ryx logging from RYX_LOG_LEVEL env var
+_ryx_logger = _logging.getLogger("ryx")
+_ryx_log_level = os.environ.get("RYX_LOG_LEVEL", "").strip().upper()
+if _ryx_log_level:
+    _ryx_log_level_num = getattr(_logging, _ryx_log_level, _logging.INFO)
+    _ryx_log_handler = _logging.StreamHandler()
+    _ryx_log_handler.setFormatter(
+        _logging.Formatter("[ryx] %(levelname)s %(name)s: %(message)s")
+    )
+    _ryx_logger.addHandler(_ryx_log_handler)
+    _ryx_logger.setLevel(_ryx_log_level_num)
+    _ryx_logger.propagate = False
 
 
 # ORM core
@@ -123,8 +137,12 @@ async def setup(
     
     # For old versions wrap the url with a dict
     if isinstance(urls, str):
-        urls = {'default': urls} 
+        urls = {'default': urls}
 
+    _ryx_logger.info(
+        "Initializing pools: %s (max_conn=%d, min_conn=%d)",
+        list(urls.keys()), max_connections, min_connections,
+    )
     await _core.setup(
         urls,
         max_connections = max_connections,
@@ -133,10 +151,12 @@ async def setup(
         idle_timeout = idle_timeout,
         max_lifetime = max_lifetime,
     )
+    _ryx_logger.info("Pools initialized: %s", list(urls.keys()))
 
 
 def register_lookup(name: str, sql_template: str) -> None:
     """Register a custom lookup operator (process-global)."""
+    _ryx_logger.debug("Register custom lookup: %s = %s", name, sql_template)
     _core.register_lookup(name, sql_template)
 
 
@@ -345,7 +365,10 @@ def _discover_config_file():
 
 def _auto_setup():
     global _AUTO_INIT_DONE
-    if _AUTO_INIT_DONE or not _should_auto_init():
+    if _AUTO_INIT_DONE:
+        return
+    if not _should_auto_init():
+        _ryx_logger.debug("Auto-init disabled via RYX_AUTO_INITIALIZE")
         return
 
     urls = _discover_urls_from_env()
@@ -356,7 +379,10 @@ def _auto_setup():
         pool_cfg = cfg.get("pool", {}) or {}
 
     if not urls:
+        _ryx_logger.debug("No URLs found — auto-init skipped")
         return
+
+    _ryx_logger.info("Auto-initializing with URLs: %s", list(urls.keys()))
 
     try:
         import asyncio
