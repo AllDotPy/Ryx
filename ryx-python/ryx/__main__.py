@@ -15,14 +15,20 @@ Commands:
   inspectdb         Introspect an existing database and print model stubs
 
 Configuration is read from (in order of precedence):
-  1. CLI flags (--url, --settings, --config, --env)
+  1. CLI flags (--url, --settings, --config, --env, --alias, --no-interactive)
   2. Config file (ryx.yaml/yml/toml if --config specified or in current dir)
   3. RYX_DATABASE_URL environment variable
   4. ryx_settings.py in the current directory
 
+CLI output uses ANSI colors (auto-disabled when NO_COLOR is set or
+stdout is not a TTY).
+
 Usage examples:
   python -m ryx migrate --url postgres://user:pass@localhost/mydb
+  python -m ryx migrate --alias blog                              # per-DB
+  python -m ryx migrate --no-interactive                          # CI/CD
   python -m ryx makemigrations --models myapp.models --dir migrations/
+  python -m ryx makemigrations --models myapp.models --check      # check mode
   python -m ryx shell --url sqlite:///dev.db
   python -m ryx showmigrations
   python -m ryx version
