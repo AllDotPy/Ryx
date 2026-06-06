@@ -1,0 +1,160 @@
+---
+sidebar_position: 12
+title: PostgreSQL Multi-Schema (Schema-per-Tenant)
+description: Isolate tenant data using PostgreSQL schemas with Ryx.
+---
+
+Ryx supports PostgreSQL **database schemas** (`CREATE SCHEMA`) to isolate data per tenant, environment, or module — all within a single database connection.
+
+Each schema has its own tables, indexes, and data. Queries and migrations are scoped to a schema via the `.schema()` builder or `--schema` CLI flag.
+
+## When to Use
+
+- **Schema-per-tenant SaaS**: each tenant gets its own schema (`tenant1`, `tenant2`, …)
+- **Environment isolation**: `staging` and `production` schemas in the same DB
+- **Logical data domains**: `analytics`, `logging`, `billing` as separate schemas
+
+## Migration with a Schema
+
+### Python
+
+Use the `--schema` flag to target a specific schema:
+
+```bash
+python -m ryx migrate \
+    --url postgres://user:pass@localhost/mydb \
+    --models myapp.models \
+    --schema tenant1
+```
+
+Or set the schema programmatically via the `MigrationRunner`:
+
+```python
+from ryx.migrations import MigrationRunner
+
+runner = MigrationRunner(
+    [Author, Post],
+    schema="tenant1",
+)
+await runner.migrate()
+```
+
+Chained builder style:
+
+```python
+runner = MigrationRunner([Author, Post]).schema("tenant1")
+await runner.migrate()
+```
+
+### Rust
+
+Use `.schema()` on the `FileRunner` builder:
+
+```rust
+use ryx_rs::migration::FileRunner;
+
+FileRunner::new()
+    .model::<Post>()
+    .model::<Author>()
+    .schema("tenant1")
+    .run().await?;
+```
+
+The DDL generator also accepts schema directly:
+
+```rust
+use ryx_rs::migration::DDLGenerator;
+use ryx_query::Backend;
+
+let ddl = DDLGenerator::new(Backend::PostgreSQL)
+    .in_schema("tenant1");
+let sql = ddl.create_table(&table_state);
+// → CREATE TABLE IF NOT EXISTS "tenant1"."posts" ( ... )
+```
+
+## Querying with a Schema
+
+### Python
+
+```python
+# All queries in this schema
+posts = await Post.objects.schema("tenant1").filter(active=True)
+
+# Chained with other methods
+tenants_posts = await (
+    Post.objects
+        .schema("tenant1")
+        .filter(views__gte=100)
+        .order_by("-created_at")
+)
+```
+
+### Rust
+
+```rust
+let posts: Vec<Post> = Post::objects()
+    .schema("tenant1")
+    .filter("active", true)
+    .all().await?;
+```
+
+## Creating Schemas
+
+Ryx auto-creates schemas during migration if they don't exist. The `CREATE SCHEMA IF NOT EXISTS` statement is issued before any table DDL when a schema is specified.
+
+You can also create schemas manually:
+
+### Python
+
+```python
+from ryx.migrations.ddl import DDLGenerator
+
+gen = DDLGenerator("postgres")
+sql = gen.create_schema("tenant1")
+# → CREATE SCHEMA IF NOT EXISTS "tenant1"
+```
+
+### Rust
+
+```rust
+use ryx_rs::migration::DDLGenerator;
+
+let ddl = DDLGenerator::new(ryx_query::Backend::PostgreSQL);
+let sql = ddl.create_schema("tenant1");
+// → CREATE SCHEMA IF NOT EXISTS "tenant1"
+```
+
+## Multi-Tenant Example
+
+Here's a complete schema-per-tenant pattern with six tenants, each getting `ms_authors` and `ms_posts` tables:
+
+```python
+tenants = ["tenant1", "tenant2", "tenant3",
+           "tenant4", "tenant5", "tenant6"]
+
+for tenant in tenants:
+    runner = MigrationRunner([Author, Post], schema=tenant)
+    await runner.migrate()
+
+# Query tenant2's data
+posts = await Post.objects.schema("tenant2").filter(active=True)
+```
+
+## Migration Tracking
+
+Migration state is tracked per-schema independently. Each schema has its own `ryx_migrations` table recording which files have been applied to that schema.
+
+```bash
+# Check status for a specific schema
+python -m ryx showmigrations --schema tenant1
+```
+
+## Backend Support
+
+PostgreSQL schemas are a **PostgreSQL-only** feature. MySQL and SQLite do not support database schemas — the `--schema` flag and `.schema()` method are silently ignored on those backends.
+
+## Next Steps
+
+- **[Multi-Database Support](./multi-db)** — Route queries across multiple database connections
+- **[Migrations](/core-concepts/migrations)** — Full migration reference
+- **[CLI Reference](./cli)** — All management commands
