@@ -88,10 +88,12 @@ class CreateTable:
     """Create a new database table."""
     table: str
     columns: List[ColumnState]
+    schema: str = ""
     model: Optional[type] = None
 
     def describe(self) -> str:
-        return f"Create table '{self.table}'"
+        s = f" (schema '{self.schema}')" if self.schema else ""
+        return f"Create table '{self.table}'{s}"
 
     def to_python(self) -> str:
         cols = ",\n            ".join(_column_state_repr(c) for c in self.columns)
@@ -102,6 +104,8 @@ class CreateTable:
             f"            {cols},",
             f"        ],",
         ]
+        if self.schema:
+            lines.append(f"        schema={self.schema!r},")
         if self.model:
             lines.append(f"        model={self.model.__qualname__},")
         lines.append(f"    ),")
@@ -116,10 +120,12 @@ class AddField:
     """Add a column to an existing table."""
     table: str
     column: ColumnState
+    schema: str = ""
     model: Optional[type] = None
 
     def describe(self) -> str:
-        return f"Add field '{self.column.name}' to '{self.table}'"
+        s = f" on '{self.table}' in schema '{self.schema}'" if self.schema else f" on '{self.table}'"
+        return f"Add field '{self.column.name}'{s}"
 
     def to_python(self) -> str:
         lines = [
@@ -127,6 +133,8 @@ class AddField:
             f"        table={self.table!r},",
             f"        column={_column_state_repr(self.column)},",
         ]
+        if self.schema:
+            lines.append(f"        schema={self.schema!r},")
         if self.model:
             lines.append(f"        model={self.model.__qualname__},")
         lines.append(f"    ),")
@@ -142,13 +150,15 @@ class AlterField:
     table: str
     new_col: ColumnState
     old_col: Optional[ColumnState] = None
+    schema: str = ""
     model: Optional[type] = None
 
     def describe(self) -> str:
         old = self.old_col
         old_info = f"{old.db_type} → " if old else ""
+        s = f" in schema '{self.schema}'" if self.schema else ""
         return (
-            f"Alter field '{self.new_col.name}' on '{self.table}': "
+            f"Alter field '{self.new_col.name}' on '{self.table}'{s}: "
             f"{old_info}{self.new_col.db_type}"
         )
 
@@ -160,6 +170,8 @@ class AlterField:
         ]
         if self.old_col:
             lines.append(f"        old_col={_column_state_repr(self.old_col)},")
+        if self.schema:
+            lines.append(f"        schema={self.schema!r},")
         if self.model:
             lines.append(f"        model={self.model.__qualname__},")
         lines.append(f"    ),")
@@ -176,10 +188,12 @@ class CreateIndex:
     name: str
     fields: List[str]
     unique: bool = False
+    schema: str = ""
     model: Optional[type] = None
 
     def describe(self) -> str:
-        return f"Create {'unique ' if self.unique else ''}index '{self.name}' on '{self.table}'"
+        s = f" in schema '{self.schema}'" if self.schema else ""
+        return f"Create {'unique ' if self.unique else ''}index '{self.name}' on '{self.table}'{s}"
 
     def to_python(self) -> str:
         lines = [
@@ -189,6 +203,8 @@ class CreateIndex:
             f"        fields={self.fields!r},",
             f"        unique={self.unique!r},",
         ]
+        if self.schema:
+            lines.append(f"        schema={self.schema!r},")
         if self.model:
             lines.append(f"        model={self.model.__qualname__},")
         lines.append(f"    ),")
@@ -263,20 +279,27 @@ def apply_migration_to_state(mf: MigrationFile, state: SchemaState) -> None:
     """Apply the operations in a MigrationFile to a SchemaState."""
     for op in mf.operations:
         if isinstance(op, CreateTable):
-            table = TableState(name=op.table)
+            table = TableState(name=op.table, schema=op.schema)
             for col in op.columns:
                 table.add_column(col)
             state.add_table(table)
 
         elif isinstance(op, AddField):
             if state.has_table(op.table):
-                state.tables[op.table].add_column(op.column)
+                # If the stored table has empty schema, inherit from op
+                tbl = state.tables[op.table]
+                if not tbl.schema and op.schema:
+                    tbl.schema = op.schema
+                tbl.add_column(op.column)
 
         elif isinstance(op, AlterField):
             if state.has_table(op.table) and state.tables[op.table].has_column(op.new_col.name):
                 col = state.tables[op.table].columns[op.new_col.name]
                 col.db_type = op.new_col.db_type
                 col.nullable = op.new_col.nullable
+
+        elif isinstance(op, CreateIndex) or isinstance(op, RunSQL):
+            pass  # indexes and raw SQL don't affect state
 
 
 ###
@@ -427,7 +450,7 @@ class Migration:
         target: SchemaState,
     ) -> List[Any]:
         """Convert SchemaChange diffs to Operation objects."""
-        # Build table → model lookup
+        # Build table → model lookup (composite key aware)
         table_to_model: Dict[str, type] = {}
         for m in self._models:
             if hasattr(m, "_meta"):
@@ -444,6 +467,7 @@ class Migration:
                     ops.append(CreateTable(
                         table = change.table,
                         columns = list(table.columns.values()),
+                        schema = change.schema,
                         model = cls,
                     ))
 
@@ -452,6 +476,7 @@ class Migration:
                     ops.append(AddField(
                         table=change.table,
                         column=change.new_state,
+                        schema=change.schema,
                         model=cls,
                     ))
 
@@ -461,10 +486,12 @@ class Migration:
                         table = change.table,
                         new_col = change.new_state,
                         old_col = change.old_state,
+                        schema = change.schema,
                         model = cls,
                     ))
 
-        # Also add index creation operations for all models
+        # Also add index creation operations for all models (no schema filtering —
+        # models are schema-agnostic; schema is applied at query/migration time)
         for model in self._models:
             if not hasattr(model, "_meta"):
                 continue

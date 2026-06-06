@@ -145,11 +145,12 @@ fn slug_from_operations(ops: &[Operation]) -> String {
                 format!("alter_{}_{}", table_name, new_column.name)
             }
             Operation::CreateIndex { index_name, .. } => format!("create_index_{index_name}"),
-            Operation::RemoveField { table_name, column_name } => {
+            Operation::RemoveField { table_name, column_name, .. } => {
                 format!("remove_{}_{}", table_name, column_name)
             }
             Operation::DeleteIndex { index_name, .. } => format!("delete_index_{index_name}"),
             Operation::RunSQL { .. } => "raw_sql".to_string(),
+            Operation::CreateSchema { schema_name, .. } => format!("create_schema_{schema_name}"),
         })
         .unwrap_or_else(|| "auto".to_string());
 
@@ -190,6 +191,7 @@ mod tests {
             }],
             model_name: Some("test::Author".into()),
             database: Some("default".into()),
+            schema: String::new(),
         }];
 
         let path = write_migration_file(&ops, &dir).unwrap();
@@ -215,6 +217,7 @@ mod tests {
             columns: vec![],
             model_name: None,
             database: None,
+            schema: String::new(),
         }];
 
         // File in subdirectory first (by numeric prefix)
@@ -237,6 +240,7 @@ mod tests {
             columns: vec![],
             model_name: None,
             database: None,
+            schema: String::new(),
         }];
         assert_eq!(slug_from_operations(&ops), "create_posts");
     }
