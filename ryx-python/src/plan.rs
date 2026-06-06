@@ -27,6 +27,7 @@ use crate::py_to_sql_value;
 ///   - "offset": int
 ///   - "distinct": bool
 ///   - "using": str
+///   - "schema": str
 #[pyfunction]
 #[pyo3(signature = (table, ops, alias=None))]
 pub fn build_plan<'py>(
@@ -172,6 +173,10 @@ pub fn build_plan<'py>(
                 let db_alias: String = tuple.get_item(1)?.extract()?;
                 let backend = ryx_pool::get_backend(Some(&db_alias)).map_err(crate::err_to_py)?;
                 node = node.with_backend(backend).with_db_alias(db_alias);
+            }
+            "schema" => {
+                let schema: String = tuple.get_item(1)?.extract()?;
+                node = node.with_schema(schema);
             }
             _ => {}
         }

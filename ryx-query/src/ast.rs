@@ -275,6 +275,7 @@ pub struct QueryNode {
     pub table: Symbol,
     pub backend: Backend,         // Database backend for SQL generation
     pub db_alias: Option<String>, // Optional alias for multi-db routing
+    pub schema: Option<Symbol>,   // Optional database schema (PostgreSQL multi-schema)
     pub operation: QueryOperation,
 
     // # WHERE
@@ -313,6 +314,7 @@ impl QueryNode {
             table: table.into(),
             backend: Backend::PostgreSQL, // default, will be overridden at runtime
             db_alias: None,
+            schema: None,
             operation: QueryOperation::Select { columns: None },
             filters: Vec::new(),
             q_filter: None,
@@ -408,6 +410,12 @@ impl QueryNode {
     #[must_use]
     pub fn with_db_alias(mut self, alias: String) -> Self {
         self.db_alias = Some(alias);
+        self
+    }
+
+    #[must_use]
+    pub fn with_schema(mut self, schema: impl Into<Symbol>) -> Self {
+        self.schema = Some(schema.into());
         self
     }
 
