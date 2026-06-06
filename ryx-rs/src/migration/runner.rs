@@ -27,6 +27,8 @@ pub struct FileRunner {
     models: Vec<fn() -> TableState>,
     model_entries: Vec<ModelEntry>,
     db_alias: Option<String>,
+    /// Database schema for PostgreSQL multi-schema support (empty = default).
+    schema: String,
     migrations_dir: String,
     dry_run: bool,
     no_interactive: bool,
@@ -40,6 +42,7 @@ impl FileRunner {
             models: vec![],
             model_entries: vec![],
             db_alias: None,
+            schema: String::new(),
             migrations_dir: "migrations".to_string(),
             dry_run: false,
             no_interactive: false,
@@ -49,6 +52,16 @@ impl FileRunner {
 
     pub fn db(mut self, alias: &str) -> Self {
         self.db_alias = Some(alias.to_string());
+        self
+    }
+
+    /// Set the database schema for PostgreSQL multi-schema support.
+    ///
+    /// When set, all introspection, DDL, and operations will be scoped
+    /// to this schema (e.g. ``CREATE TABLE "tenant1"."posts"``).
+    /// Leave empty for default schema (no qualification).
+    pub fn schema(mut self, schema: &str) -> Self {
+        self.schema = schema.to_string();
         self
     }
 
@@ -79,18 +92,27 @@ impl FileRunner {
             let columns: Vec<ColumnState> = meta.iter().map(|m| m.into()).collect();
             TableState {
                 name: M::table_name().to_string(),
+                schema: String::new(),
                 columns,
             }
         };
         self.models.push(info_fn);
-        self.model_entries.push(ModelEntry::from_model::<M>());
+        let mut entry = ModelEntry::from_model::<M>();
+        if !self.schema.is_empty() {
+            entry = entry.with_schema(&self.schema);
+        }
+        self.model_entries.push(entry);
         self
     }
 
     fn build_target(&self) -> SchemaState {
-        SchemaState {
-            tables: self.models.iter().map(|f| f()).collect(),
+        let mut tables: Vec<TableState> = self.models.iter().map(|f| f()).collect();
+        if !self.schema.is_empty() {
+            for table in &mut tables {
+                table.schema = self.schema.clone();
+            }
         }
+        SchemaState { tables }
     }
 
     // ── Public API ──────────────────────────────────────
@@ -134,12 +156,18 @@ impl FileRunner {
         let target = self.build_target();
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
-        let current = introspect_schema(pool.as_ref(), backend_type).await?;
+        let current = introspect_schema(pool.as_ref(), backend_type, &self.schema).await?;
         let changes = diff_states(&current, &target);
         if changes.is_empty() {
             return Ok(vec![]);
         }
-        let ddl = generate_ddl(&changes, backend_type);
+        let ddl = if self.schema.is_empty() {
+            generate_ddl(&changes, backend_type)
+        } else {
+            DDLGenerator::new(backend_type)
+                .in_schema(&self.schema)
+                .generate(&changes)
+        };
         let mut results = Vec::new();
         for stmt in &ddl {
             if self.dry_run {
@@ -155,10 +183,17 @@ impl FileRunner {
     async fn plan_live(&self, alias: &str) -> RyxResult<Vec<String>> {
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
-        let current = introspect_schema(pool.as_ref(), backend_type).await?;
+        let current = introspect_schema(pool.as_ref(), backend_type, &self.schema).await?;
         let target = self.build_target();
         let changes = diff_states(&current, &target);
-        Ok(generate_ddl(&changes, backend_type))
+        let ddl = if self.schema.is_empty() {
+            generate_ddl(&changes, backend_type)
+        } else {
+            DDLGenerator::new(backend_type)
+                .in_schema(&self.schema)
+                .generate(&changes)
+        };
+        Ok(ddl)
     }
 
     // ── File pipeline ───────────────────────────────────
@@ -170,7 +205,11 @@ impl FileRunner {
     ) -> RyxResult<Vec<String>> {
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
-        let ddl = DDLGenerator::new(backend_type);
+        let base_ddl = if self.schema.is_empty() {
+            DDLGenerator::new(backend_type)
+        } else {
+            DDLGenerator::new(backend_type).in_schema(&self.schema)
+        };
         let applied = self.get_applied_migrations(&pool, alias).await?;
         let mut results = Vec::new();
 
@@ -196,6 +235,10 @@ impl FileRunner {
                 if !operation_is_relevant(op, alias) {
                     continue;
                 }
+                let mut ddl = base_ddl.clone();
+                if !op.schema().is_empty() {
+                    ddl.schema = op.schema().to_string();
+                }
                 for sql in operation_to_sql(&ddl, op) {
                     if self.dry_run {
                         println!("{sql}");
@@ -220,7 +263,11 @@ impl FileRunner {
     ) -> RyxResult<Vec<String>> {
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
-        let ddl = DDLGenerator::new(backend_type);
+        let base_ddl = if self.schema.is_empty() {
+            DDLGenerator::new(backend_type)
+        } else {
+            DDLGenerator::new(backend_type).in_schema(&self.schema)
+        };
         let applied = self.get_applied_migrations(&pool, alias).await?;
         let mut results = Vec::new();
 
@@ -236,6 +283,10 @@ impl FileRunner {
             if let Ok(mf) = load_migration_file(path) {
                 for op in &mf.operations {
                     if operation_is_relevant(op, alias) {
+                        let mut ddl = base_ddl.clone();
+                        if !op.schema().is_empty() {
+                            ddl.schema = op.schema().to_string();
+                        }
                         results.extend(operation_to_sql(&ddl, op));
                     }
                 }
@@ -300,7 +351,7 @@ impl FileRunner {
         let target = self.build_target();
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
-        let current = introspect_schema(pool.as_ref(), backend_type).await?;
+        let current = introspect_schema(pool.as_ref(), backend_type, &self.schema).await?;
         let changes = diff_states(&current, &target);
 
         if changes.is_empty() {
@@ -431,6 +482,14 @@ pub fn operation_is_relevant(op: &Operation, alias: &str) -> bool {
 /// Convert an ``Operation`` to backend-aware DDL statements.
 pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
     match op {
+        Operation::CreateSchema { schema_name, .. } => {
+            let sql = ddl.create_schema(schema_name);
+            if sql.is_empty() {
+                vec![]
+            } else {
+                vec![sql]
+            }
+        }
         Operation::CreateTable {
             table_name, columns, ..
         } => {
@@ -447,6 +506,7 @@ pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
                 .collect();
             vec![ddl.create_table(&TableState {
                 name: table_name.clone(),
+                schema: ddl.schema.clone(),
                 columns: cols,
             })]
         }
@@ -468,6 +528,7 @@ pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
         Operation::RemoveField {
             table_name,
             column_name,
+            ..
         } => vec![ddl.drop_column(table_name, column_name)],
         Operation::AlterField {
             table_name,
@@ -505,6 +566,7 @@ pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
         Operation::DeleteIndex {
             table_name,
             index_name,
+            ..
         } => vec![ddl.drop_index(table_name, index_name)],
         Operation::RunSQL { sql, .. } => vec![sql.clone()],
     }
