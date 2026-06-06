@@ -127,6 +127,9 @@ When using multiple databases, each operation knows its target database from the
 # Apply only to the "blog" alias
 python -m ryx migrate --alias blog
 
+# Target a specific PostgreSQL schema (schema-per-tenant)
+python -m ryx migrate --schema tenant1
+
 # Non-interactive mode (for CI/CD)
 python -m ryx migrate --no-interactive
 ```
@@ -191,12 +194,13 @@ print(gen.add_column("posts", column_state))
 ## Backend Differences
 
 | Feature | PostgreSQL | MySQL | SQLite |
-|---|---|---|---|
+|---|---|---|---|---|
 | `ALTER COLUMN` | Yes | Yes | No (recreate table) |
 | Native UUID | Yes | No | No |
 | `SERIAL` | Yes | No | No |
 | `JSONB` | Yes | No | No |
 | Array types | Yes | No | No |
+| **Database schemas** | **`"schema"."table"`** | No | No |
 
 ## Next Steps
 
