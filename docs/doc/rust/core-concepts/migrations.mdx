@@ -160,6 +160,13 @@ MigrationRunner::new()
     .model::<Post>()
     .run().await?;
 
+// Live mode with schema (PostgreSQL multi-schema)
+MigrationRunner::new()
+    .live(true)
+    .model::<Post>()
+    .schema("tenant1")
+    .run().await?;
+
 // Preview only
 let sql: Vec<String> = MigrationRunner::new()
     .model::<Post>()
@@ -247,6 +254,7 @@ Files in subdirectories are found automatically — no per-alias configuration n
 | `DROP COLUMN` | Yes | Yes | Not supported (comment) |
 | Native UUID | Yes | No | No |
 | `SERIAL` | `BIGSERIAL` | `INT AUTO_INCREMENT` | `INTEGER PRIMARY KEY AUTOINCREMENT` |
+| **Database schemas** | **`"schema"."table"`** | No | No |
 
 ## Next Steps
 
