@@ -122,6 +122,9 @@ def _build_parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--plan", action="store_true", help="Show migration plan without executing"
     )
+    m.add_argument(
+        "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)"
+    )
     m.set_defaults(func=cmd_migrate)
 
     # makemigrations
@@ -153,6 +156,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sq = sub.add_parser("sqlmigrate", help="Print SQL for a migration (dry run)")
     sq.add_argument("name", help="Migration name (e.g. 0001_initial)")
     sq.add_argument("--dir", default="migrations", metavar="DIR")
+    sq.add_argument(
+        "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)"
+    )
     sq.set_defaults(func=cmd_sqlmigrate)
 
     # flush
@@ -201,6 +207,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ins.add_argument("--table", metavar="TABLE", help="Inspect only this table")
     ins.add_argument("--output", "-o", metavar="FILE", help="Write output to file")
+    ins.add_argument(
+        "--schema", metavar="SCHEMA", default="public", help="Database schema to introspect (default: public)"
+    )
     ins.set_defaults(func=cmd_inspectdb)
 
     return p

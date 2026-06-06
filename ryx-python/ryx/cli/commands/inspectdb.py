@@ -28,6 +28,10 @@ class InspectDbCommand(Command):
             metavar="FILE",
             help="Write output to file instead of stdout",
         )
+        parser.add_argument(
+            "--schema", metavar="SCHEMA", default="public",
+            help="Database schema to introspect (default: public)",
+        )
 
     async def execute(self, args: argparse.Namespace) -> int:
         cfg = getattr(args, "resolved_config", None) or resolve_config(args)
@@ -45,10 +49,11 @@ class InspectDbCommand(Command):
         from ryx.executor_helpers import raw_fetch
 
         # Get table list (Postgres / MySQL)
+        schema = getattr(args, "schema", "public")
         try:
             tables = await raw_fetch(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+                f"SELECT table_name FROM information_schema.tables "
+                f"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'"
             )
         except Exception:
             tables = await raw_fetch(
@@ -76,6 +81,7 @@ class InspectDbCommand(Command):
                 cols = await raw_fetch(
                     f"SELECT column_name, data_type, is_nullable, column_default "
                     f"FROM information_schema.columns WHERE table_name = '{table_name}' "
+                    f"AND table_schema = '{schema}' "
                     f"ORDER BY ordinal_position"
                 )
             except Exception:

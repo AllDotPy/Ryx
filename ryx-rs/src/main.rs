@@ -40,6 +40,9 @@ enum Commands {
 
         #[arg(long)]
         no_interactive: bool,
+
+        #[arg(long)]
+        schema: Option<String>,
     },
 
     /// Detect model changes and generate migration files
@@ -72,6 +75,9 @@ enum Commands {
 
         #[arg(long)]
         backends: Option<String>,
+
+        #[arg(long)]
+        schema: Option<String>,
     },
 }
 
@@ -80,8 +86,8 @@ async fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Migrate { dir, alias, dry_run, no_interactive } => {
-            cmd_migrate(&cli, dir, alias.as_deref(), *dry_run, *no_interactive).await;
+        Commands::Migrate { dir, alias, dry_run, no_interactive, schema } => {
+            cmd_migrate(&cli, dir, alias.as_deref(), *dry_run, *no_interactive, schema.as_deref()).await;
         }
         Commands::Makemigrations { dir, check } => {
             cmd_makemigrations(dir, *check).await;
@@ -89,8 +95,8 @@ async fn main() {
         Commands::Showmigrations { dir, unapplied, alias } => {
             cmd_showmigrations(&cli, dir, *unapplied, alias.as_deref()).await;
         }
-        Commands::Sqlmigrate { name, dir, backends } => {
-            cmd_sqlmigrate(dir, name, backends.as_deref());
+        Commands::Sqlmigrate { name, dir, backends, schema } => {
+            cmd_sqlmigrate(dir, name, backends.as_deref(), schema.as_deref());
         }
     }
 }
@@ -103,17 +109,22 @@ async fn cmd_migrate(
     alias: Option<&str>,
     dry_run: bool,
     no_interactive: bool,
+    schema: Option<&str>,
 ) {
     let alias = alias.unwrap_or("default");
     init_pool(cli).await;
 
-    let result = FileRunner::new()
+    let mut runner = FileRunner::new()
         .migrations_dir(dir)
         .db(alias)
         .dry_run(dry_run)
-        .no_interactive(no_interactive)
-        .run()
-        .await;
+        .no_interactive(no_interactive);
+
+    if let Some(s) = schema {
+        runner = runner.schema(s);
+    }
+
+    let result = runner.run().await;
 
     match result {
         Ok(statements) => {
@@ -186,7 +197,7 @@ async fn cmd_showmigrations(cli: &Cli, dir: &str, unapplied: bool, alias: Option
 
 // ── sqlmigrate ──────────────────────────────────────────
 
-fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>) {
+fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>, schema: Option<&str>) {
     let path = match find_migration_file(Path::new(dir), name) {
         Some(p) => p,
         None => {
@@ -218,7 +229,7 @@ fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>) {
             }
         };
 
-        let ddl = DDLGenerator::new(backend);
+        let ddl = DDLGenerator::new(backend).in_schema(schema.unwrap_or(""));
         let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
         if backend_list.len() > 1 {

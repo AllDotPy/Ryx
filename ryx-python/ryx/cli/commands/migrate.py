@@ -42,6 +42,9 @@ class MigrateCommand(Command):
             action="store_true",
             help="Fail if no migration files found (for CI)",
         )
+        parser.add_argument(
+            "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)",
+        )
 
     async def execute(self, args: argparse.Namespace) -> int:
         cfg = getattr(args, "resolved_config", None)
@@ -70,6 +73,7 @@ class MigrateCommand(Command):
             models,
             dry_run=getattr(args, "dry_run", False),
             alias_filter=getattr(args, "database", None) or (cfg.db_alias if cfg else None),
+            schema=getattr(args, "schema", "") or "",
             migrations_dir=getattr(args, "dir", "migrations"),
             no_interactive=getattr(args, "no_interactive", False),
         )

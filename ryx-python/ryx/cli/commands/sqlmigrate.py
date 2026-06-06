@@ -30,6 +30,9 @@ class SqlMigrateCommand(Command):
             "--backends",
             help="Filter to specific backends (comma-separated: postgres,mysql,sqlite)",
         )
+        parser.add_argument(
+            "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)",
+        )
 
     async def execute(self, args: argparse.Namespace) -> int:
         mig_dir = Path(args.dir)
@@ -48,7 +51,8 @@ class SqlMigrateCommand(Command):
 
         from ryx.migrations.ddl import DDLGenerator
 
-        gen = DDLGenerator()
+        schema = getattr(args, "schema", "") or ""
+        gen = DDLGenerator(schema=schema)
 
         print(f"\n{PREFIX} SQL for migration: {cyan(mig_file.name)}\n")
 
@@ -71,7 +75,7 @@ class SqlMigrateCommand(Command):
             from ryx.migrations.state import TableState
 
             if isinstance(op, CreateTable):
-                t = TableState(name=op.table)
+                t = TableState(name=op.table, schema=op.schema)
                 for col in op.columns:
                     t.add_column(col)
                 print(gen.create_table(t) + ";\n")
