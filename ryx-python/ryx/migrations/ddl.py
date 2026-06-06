@@ -51,10 +51,31 @@ class DDLGenerator:
 
     Args:
         backend: One of "postgres" (default), "mysql", "sqlite".
+        schema:  Database schema for PostgreSQL multi-schema support
+                 (empty = default / no qualification).
     """
 
-    def __init__(self, backend: str = "postgres") -> None:
+    def __init__(self, backend: str = "postgres", schema: str = "") -> None:
         self.backend = backend.lower()
+        self.schema = schema
+
+    def _qn(self, table_name: str) -> str:
+        """Return a schema-qualified table name.
+
+        If ``self.schema`` is non-empty and the backend is PostgreSQL,
+        returns ``"schema"."table"``. Otherwise returns just the quoted name.
+        """
+        q = self._q(table_name)
+        if self.schema and self.backend == "postgres":
+            return f'{self._q(self.schema)}.{q}'
+        return q
+
+    # Schema operations
+    def create_schema(self, schema_name: str) -> Optional[str]:
+        """Generate CREATE SCHEMA IF NOT EXISTS (PostgreSQL only)."""
+        if self.backend == "postgres" and schema_name:
+            return f"CREATE SCHEMA IF NOT EXISTS {self._q(schema_name)}"
+        return None
 
     # CREATE TABLE
     def create_table(self, table: "TableState") -> str:
@@ -80,7 +101,7 @@ class DDLGenerator:
 
         cols_sql = ",\n    ".join(col_defs)
         return (
-            f"CREATE TABLE IF NOT EXISTS {self._q(table.name)} (\n"
+            f"CREATE TABLE IF NOT EXISTS {self._qn(table.name)} (\n"
             f"    {cols_sql}\n"
             f")"
         )
@@ -94,7 +115,7 @@ class DDLGenerator:
             col:        The ColumnState describing the new column.
         """
         col_def = self._column_def(col)
-        return f"ALTER TABLE {self._q(table_name)} ADD COLUMN {col_def}"
+        return f"ALTER TABLE {self._qn(table_name)} ADD COLUMN {col_def}"
 
     # ALTER TABLE ALTER COLUMN
     def alter_column(self, table_name: str, col: "ColumnState") -> Optional[str]:
@@ -113,27 +134,27 @@ class DDLGenerator:
             # Manual rebuild query
             return (
                 # First change table name to temp name, ex: users → users_old
-                f"ALTER TABLE {self._q(table_name)} RENAME TO {self._q(table_name + '_old')};\n"
+                f"ALTER TABLE {self._qn(table_name)} RENAME TO {self._qn(table_name + '_old')};\n"
                 # Then create new table with correct schema
                 f"{self.create_table(col.table)};\n"
                 # Copy data from old table to new table
-                f"INSERT INTO {self._q(table_name)} ({', '.join(self._q(c) for c in col.table.columns.keys())}) "
-                f"SELECT {', '.join(self._q(c) for c in col.table.columns.keys())} FROM {self._q(table_name + '_old')};\n"
+                f"INSERT INTO {self._qn(table_name)} ({', '.join(self._q(c) for c in col.table.columns.keys())}) "
+                f"SELECT {', '.join(self._q(c) for c in col.table.columns.keys())} FROM {self._qn(table_name + '_old')};\n"
                 # Finally drop the old table
-                f"DROP TABLE {self._q(table_name + '_old')};"
+                f"DROP TABLE {self._qn(table_name + '_old')};"
             )
 
         if self.backend == "mysql":
             # MySQL syntax: ALTER TABLE t MODIFY COLUMN col_def
             col_def = self._column_def(col)
-            return f"ALTER TABLE {self._q(table_name)} MODIFY COLUMN {col_def}"
+            return f"ALTER TABLE {self._qn(table_name)} MODIFY COLUMN {col_def}"
 
         # PostgreSQL: split into two statements (type change + nullability)
         if self.backend == "postgres":
             db_type = self._translate_type(col.db_type)
             null_clause = "DROP NOT NULL" if col.nullable else "SET NOT NULL"
             return (
-                f"ALTER TABLE {self._q(table_name)} "
+                f"ALTER TABLE {self._qn(table_name)} "
                 f"ALTER COLUMN {self._q(col.name)} TYPE {db_type}, "
                 f"{f'ALTER COLUMN {self._q(col.name)} SET DEFAULT {self._q(col.default)},' if col.default is not None else ''}"
                 f"ALTER COLUMN {self._q(col.name)} {null_clause};"
@@ -150,14 +171,14 @@ class DDLGenerator:
         We generate the statement anyway and let the driver error if unsupported.
         """
         return (
-            f"ALTER TABLE {self._q(table_name)} "
+            f"ALTER TABLE {self._qn(table_name)} "
             f"DROP COLUMN {self._q(col_name)}"
         )
 
     # DROP TABLE 
     def drop_table(self, table_name: str) -> str:
         """Generate a DROP TABLE IF EXISTS statement."""
-        return f"DROP TABLE IF EXISTS {self._q(table_name)}"
+        return f"DROP TABLE IF EXISTS {self._qn(table_name)}"
 
     # CREATE INDEX
     def create_index(self, table_name: str, index: "Index") -> str:
@@ -174,7 +195,7 @@ class DDLGenerator:
         cols   = ", ".join(self._q(f) for f in index.fields)
         return (
             f"CREATE {unique}INDEX IF NOT EXISTS {self._q(index.name)} "
-            f"ON {self._q(table_name)} ({cols})"
+            f"ON {self._qn(table_name)} ({cols})"
         )
 
     def create_index_from_fields(
@@ -193,7 +214,7 @@ class DDLGenerator:
         cols = ", ".join(self._q(f) for f in fields)
         return (
             f"CREATE {unique_kw}INDEX IF NOT EXISTS {self._q(name)} "
-            f"ON {self._q(table_name)} ({cols})"
+            f"ON {self._qn(table_name)} ({cols})"
         )
 
     # DROP INDEX
@@ -203,7 +224,7 @@ class DDLGenerator:
         MySQL requires the table name; Postgres and SQLite do not.
         """
         if self.backend == "mysql" and table_name:
-            return f"DROP INDEX {self._q(index_name)} ON {self._q(table_name)}"
+            return f"DROP INDEX {self._q(index_name)} ON {self._qn(table_name)}"
         return f"DROP INDEX IF EXISTS {self._q(index_name)}"
 
     # ADD CONSTRAINT (CHECK)
@@ -216,7 +237,7 @@ class DDLGenerator:
         if self.backend == "sqlite":
             return None  # SQLite: include in CREATE TABLE only
         return (
-            f"ALTER TABLE {self._q(table_name)} "
+            f"ALTER TABLE {self._qn(table_name)} "
             f"ADD CONSTRAINT {self._q(constraint.name)} "
             f"CHECK ({constraint.check})"
         )
@@ -241,10 +262,10 @@ class DDLGenerator:
 
         cname = constraint_name or f"fk_{table_name}_{col_name}"
         return (
-            f"ALTER TABLE {self._q(table_name)} "
+            f"ALTER TABLE {self._qn(table_name)} "
             f"ADD CONSTRAINT {self._q(cname)} "
             f"FOREIGN KEY ({self._q(col_name)}) "
-            f"REFERENCES {self._q(ref_table)} ({self._q(ref_col)}) "
+            f"REFERENCES {self._qn(ref_table)} ({self._q(ref_col)}) "
             f"ON DELETE {on_delete}"
         )
 
@@ -363,6 +384,7 @@ def generate_schema_ddl(
     stmts: List[str] = []
 
     for table in state.tables.values():
+        gen = DDLGenerator(backend, schema=table.schema if table.schema else "")
         stmts.append(gen.create_table(table))
 
     if not include_indexes:
