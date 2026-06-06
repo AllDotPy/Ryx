@@ -78,6 +78,7 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 | **Lookups** | Basic | Basic | **30+** |
 | **select_related** | ❌ | ✅ (Eager) | ✅ |
 | **Migrations** | Diesel CLI | sea-orm-cli | **Built-in** |
+| **PostgreSQL schemas** | ❌ | ❌ | ✅ |
 | **Backends** | PG · MySQL · SQLite | PG · MySQL · SQLite | **PG · MySQL · SQLite** |
 
 ## Architecture
