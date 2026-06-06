@@ -13,6 +13,8 @@ pub struct ModelEntry {
     pub table_name: String,
     /// Database alias for routing — read from ``Model::database()``.
     pub database: String,
+    /// Database schema for PostgreSQL (empty = default / no qualification).
+    pub schema: String,
     /// Builds the target ``TableState`` for this model.
     pub make_state: fn() -> TableState,
 }
@@ -31,14 +33,24 @@ impl ModelEntry {
             name: M::table_name().to_string(),
             table_name: M::table_name().to_string(),
             database: M::database().to_string(),
+            schema: String::new(),
             make_state: || -> TableState {
                 let metas = M::field_meta();
                 TableState {
                     name: M::table_name().to_string(),
+                    schema: String::new(),
                     columns: metas.iter().map(|m| m.into()).collect(),
                 }
             },
         }
+    }
+}
+
+impl ModelEntry {
+    /// Set the database schema for this entry (PostgreSQL multi-schema).
+    pub fn with_schema(mut self, schema: &str) -> Self {
+        self.schema = schema.to_string();
+        self
     }
 }
 
@@ -62,7 +74,11 @@ impl Autodetector {
     pub fn build_target(&self) -> SchemaState {
         let mut tables = Vec::new();
         for entry in &self.entries {
-            tables.push((entry.make_state)());
+            let mut state = (entry.make_state)();
+            if !entry.schema.is_empty() {
+                state.schema = entry.schema.clone();
+            }
+            tables.push(state);
         }
         SchemaState { tables }
     }
@@ -93,7 +109,10 @@ impl Autodetector {
         for op in ops {
             match op {
                 Operation::CreateTable {
-                    table_name, columns, ..
+                    table_name,
+                    columns,
+                    schema,
+                    ..
                 } => {
                     let cols: Vec<ColumnState> = columns
                         .iter()
@@ -107,16 +126,23 @@ impl Autodetector {
                         })
                         .collect();
                     // Replace if already exists (idempotent replay)
-                    tables.retain(|t| t.name != *table_name);
+                    tables.retain(|t| t.name != *table_name || t.schema != *schema);
                     tables.push(TableState {
                         name: table_name.clone(),
+                        schema: schema.clone(),
                         columns: cols,
                     });
                 }
                 Operation::AddField {
-                    table_name, column, ..
+                    table_name,
+                    column,
+                    schema,
+                    ..
                 } => {
-                    if let Some(table) = tables.iter_mut().find(|t| t.name == *table_name) {
+                    if let Some(table) = tables
+                        .iter_mut()
+                        .find(|t| t.name == *table_name && t.schema == *schema)
+                    {
                         table.columns.push(ColumnState {
                             name: column.name.clone(),
                             db_type: column.db_type.clone(),
@@ -131,9 +157,13 @@ impl Autodetector {
                     table_name,
                     old_column,
                     new_column,
+                    schema,
                     ..
                 } => {
-                    if let Some(table) = tables.iter_mut().find(|t| t.name == *table_name) {
+                    if let Some(table) = tables
+                        .iter_mut()
+                        .find(|t| t.name == *table_name && t.schema == *schema)
+                    {
                         if let Some(col) = table
                             .columns
                             .iter_mut()
@@ -149,12 +179,16 @@ impl Autodetector {
                 Operation::RemoveField {
                     table_name,
                     column_name,
+                    schema,
                 } => {
-                    if let Some(table) = tables.iter_mut().find(|t| t.name == *table_name) {
+                    if let Some(table) = tables
+                        .iter_mut()
+                        .find(|t| t.name == *table_name && t.schema == *schema)
+                    {
                         table.columns.retain(|c| c.name != *column_name);
                     }
                 }
-                // CreateIndex / DeleteIndex / RunSQL don't affect the schema state
+                // CreateIndex / DeleteIndex / RunSQL / CreateSchema don't affect the schema state
                 _ => {}
             }
         }
@@ -178,6 +212,16 @@ impl Autodetector {
     /// corresponding ``CreateTable`` operation's column list.
     fn changes_to_operations(&self, changes: &[SchemaChange]) -> Vec<Operation> {
         let mut ops = Vec::new();
+
+        // Pass 0: CreateSchema
+        for ch in changes {
+            if ch.kind == crate::migration::ChangeKind::CreateSchema {
+                ops.push(Operation::CreateSchema {
+                    schema_name: ch.schema.clone(),
+                    database: None,
+                });
+            }
+        }
 
         // Collect tables being created so we know which AddColumns to merge
         let created_tables: Vec<&str> = changes
@@ -214,6 +258,7 @@ impl Autodetector {
                     columns: cols,
                     model_name: entry.map(|e| e.name.clone()),
                     database: entry.map(|e| e.database.clone()),
+                    schema: ch.schema.clone(),
                 });
             }
         }
@@ -237,6 +282,7 @@ impl Autodetector {
                         },
                         model_name: entry.map(|e| e.name.clone()),
                         database: entry.map(|e| e.database.clone()),
+                        schema: ch.schema.clone(),
                     });
                 }
             }
@@ -267,6 +313,7 @@ impl Autodetector {
                         },
                         model_name: entry.map(|e| e.name.clone()),
                         database: entry.map(|e| e.database.clone()),
+                        schema: ch.schema.clone(),
                     });
                 }
             }
