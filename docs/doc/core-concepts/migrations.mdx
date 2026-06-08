@@ -125,7 +125,7 @@ When using multiple databases, each operation knows its target database from the
 
 ```bash
 # Apply only to the "blog" alias
-python -m ryx migrate --alias blog
+python -m ryx migrate --database blog
 
 # Target a specific PostgreSQL schema (schema-per-tenant)
 python -m ryx migrate --schema tenant1
