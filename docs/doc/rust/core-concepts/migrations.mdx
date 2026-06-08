@@ -45,9 +45,9 @@ ryx showmigrations --dir migrations/
 ## CLI Reference
 
 ```bash
-ryx migrate   [--dir DIR] [--alias ALIAS] [--dry-run] [--no-interactive]
-ryx makemigrations --dir DIR [--check]
-ryx showmigrations [--dir DIR] [--unapplied] [--alias ALIAS]
+ryx migrate   [--dir DIR] [--database ALIAS] [--dry-run] [--no-interactive]
+ryx makemigrations --dir DIR [--alias ALIAS] [--check]
+ryx showmigrations [--dir DIR] [--unapplied]
 ryx sqlmigrate NAME [--dir DIR] [--backends postgres,mysql,sqlite]
 ```
 
