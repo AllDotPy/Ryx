@@ -71,8 +71,10 @@ const sidebars = {
         'advanced/custom-lookups',
         'advanced/sync-async',
         'advanced/multi-db',
+        'advanced/configuration-and-routing',
         'advanced/raw-sql',
         'advanced/cli',
+        'advanced/postgres-multi-schema',
       ],
     },
     {
@@ -97,6 +99,7 @@ const sidebars = {
         'internals/query-compiler',
         'internals/connection-pool',
         'internals/type-conversion',
+        'internals/performance',
       ],
     },
     {
@@ -157,6 +160,7 @@ const sidebars = {
             'rust/advanced/caching',
           ],
         },
+        'rust/reference',
       ],
     },
   ],
