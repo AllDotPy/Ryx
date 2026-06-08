@@ -78,6 +78,9 @@ once_cell = "1"
 toml = "0.8"
 serde_yaml = "0.9"
 
+# CLI (ryx-rs binary)
+clap = { version = "4", features = ["derive"] }
+
 # tracing: structured, async-aware logging. We instrument every SQL execution
 # so users can enable RUST_LOG=ryx=debug for full query visibility.
 tracing = "0.1"

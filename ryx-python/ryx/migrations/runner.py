@@ -4,14 +4,15 @@ Ryx ORM — Migration Runner  (backend-aware, full DDL support)
 Applies pending schema changes to the live database.
 Uses DDLGenerator for backend-correct SQL (Postgres / MySQL / SQLite).
 
-Steps:
-  1. Ensure the ryx_migrations tracking table exists
-  2. Introspect the live database schema
-  3. Build the target schema from Model declarations
-  4. Diff the two states
-  5. Generate DDL via DDLGenerator (backend-aware)
-  6. Execute each DDL statement
-  7. Also create indexes and constraints declared in Model.Meta
+Discovery strategy — Flat + Meta-routing:
+  1. Recursively find all ``[0-9]*.py`` files under ``migrations/`` (flat, by global sort).
+  2. For each database alias, filter operations by reading ``op.model._meta.database``.
+  3. Apply only relevant operations per alias; track as ``alias|stem`` in ``ryx_migrations``.
+  4. If no files exist, offer an interactive fallback (Live / Auto / Manual / Skip).
+
+CLI output uses ANSI colors (``[ryx]`` prefix in bold blue, ✓ in green,
+✗ in red, ⚠ in yellow). Colors auto-disable when ``NO_COLOR`` is set or
+stdout is not a TTY.
 """
 
 from __future__ import annotations
@@ -75,17 +76,29 @@ class MigrationRunner:
         dry_run: bool = False,
         backend: Optional[str] = None,
         alias_filter: Optional[str] = None,
+        schema: str = "",
         migrations_dir: str = "migrations",
         no_interactive: bool = False,
     ) -> None:
         self._models = models
         self._dry_run = dry_run
         self._alias_filter = alias_filter
+        self._schema = schema
         self._migrations_dir = Path(migrations_dir)
         self._no_interactive = no_interactive
         # 'backend' is now a fallback if we can't detect it from the pool
         self._fallback_backend = backend.lower() if backend else "postgres"
         self._ddl = None  # Will be initialized per-database during migration
+
+    # Builder pattern for schema
+    def schema(self, schema: str) -> "MigrationRunner":
+        """Set the database schema (PostgreSQL multi-schema support)."""
+        self._schema = schema
+        return self
+
+    def _create_ddl(self, backend: str, schema: str = "") -> DDLGenerator:
+        """Create a DDLGenerator, falling back to runner-level schema."""
+        return DDLGenerator(backend, schema=schema or self._schema)
 
     async def migrate(self) -> List[SchemaChange]:
         """Detect and apply all pending schema changes across configured databases.
@@ -130,7 +143,7 @@ class MigrationRunner:
                 backend = self._fallback_backend
 
             self._current_backend = backend
-            self._ddl = DDLGenerator(backend)
+            self._ddl = self._create_ddl(backend)
             self._current_alias = alias
 
             # Determine models for this alias
@@ -279,20 +292,24 @@ class MigrationRunner:
 
     def _operation_to_ddl(self, op) -> Optional[str]:
         """Convert a migration Operation to a DDL SQL string."""
+        # Use operation schema if set, otherwise fall back to runner schema
+        op_schema = getattr(op, "schema", "")
+        ddl = self._create_ddl(self._current_backend, schema=op_schema)
+
         if isinstance(op, CreateTable):
-            table = TableState(name=op.table)
+            table = TableState(name=op.table, schema=op_schema)
             for col in op.columns:
                 table.add_column(col)
-            return self._ddl.create_table(table)
+            return ddl.create_table(table)
 
         if isinstance(op, AddField):
-            return self._ddl.add_column(op.table, op.column)
+            return ddl.add_column(op.table, op.column)
 
         if isinstance(op, AlterField):
-            return self._ddl.alter_column(op.table, op.new_col)
+            return ddl.alter_column(op.table, op.new_col)
 
         if isinstance(op, CreateIndex):
-            return self._ddl.create_index_from_fields(
+            return ddl.create_index_from_fields(
                 op.table, op.fields, op.name, unique=op.unique,
             )
 
@@ -420,28 +437,29 @@ class MigrationRunner:
     async def _introspect_schema(self, alias: str) -> SchemaState:
         """Query the live database to build a current SchemaState."""
         state = SchemaState()
+        schema = self._schema or "public"
 
-        tables = await self._get_tables(alias)
+        tables = await self._get_tables(alias, schema)
         for table_name in tables:
             if not table_name or table_name.startswith("ryx_"):
                 continue
-            columns = await self._get_columns(table_name, alias)
-            tbl = TableState(name=table_name)
+            columns = await self._get_columns(table_name, schema, alias)
+            tbl = TableState(name=table_name, schema=self._schema)
             for col in columns:
                 tbl.add_column(col)
             state.add_table(tbl)
 
         return state
 
-    async def _get_tables(self, alias: str) -> List[str]:
+    async def _get_tables(self, alias: str, schema: str = "public") -> List[str]:
         """Return the list of user table names from the live DB."""
         from ryx.executor_helpers import raw_fetch
 
         # information_schema (Postgres / MySQL)
         try:
             rows = await raw_fetch(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+                f"SELECT table_name FROM information_schema.tables "
+                f"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'",
                 alias=alias,
             )
             if rows:
@@ -449,7 +467,7 @@ class MigrationRunner:
         except Exception:
             pass
 
-        # SQLite fallback
+        # SQLite fallback (schema parameter ignored)
         try:
             rows = await raw_fetch(
                 "SELECT name AS table_name FROM sqlite_master WHERE type='table'",
@@ -459,7 +477,7 @@ class MigrationRunner:
         except Exception:
             return []
 
-    async def _get_columns(self, table_name: str, alias: str) -> List[ColumnState]:
+    async def _get_columns(self, table_name: str, schema: str, alias: str) -> List[ColumnState]:
         """Return ColumnState objects for each column in the given table."""
         from ryx.executor_helpers import raw_fetch
 
@@ -470,7 +488,9 @@ class MigrationRunner:
             rows = await raw_fetch(
                 f"SELECT column_name, data_type, is_nullable, column_default "
                 f"FROM information_schema.columns "
-                f"WHERE table_name = '{table_name}' ORDER BY ordinal_position",
+                f"WHERE table_name = '{table_name}' "
+                f"AND table_schema = '{schema}' "
+                f"ORDER BY ordinal_position",
                 alias=alias,
             )
             if rows:
@@ -539,16 +559,18 @@ class MigrationRunner:
     ) -> Optional[str]:
         """Generate DDL SQL for a single SchemaChange."""
 
+        ddl = self._create_ddl(self._current_backend, schema=change.schema)
+
         if change.kind == ChangeKind.CREATE_TABLE:
             table = target.tables.get(change.table)
             if table:
-                return self._ddl.create_table(table)
+                return ddl.create_table(table)
 
         elif change.kind == ChangeKind.ADD_COLUMN and change.new_state:
-            return self._ddl.add_column(change.table, change.new_state)
+            return ddl.add_column(change.table, change.new_state)
 
         elif change.kind == ChangeKind.ALTER_COLUMN and change.new_state:
-            sql = self._ddl.alter_column(change.table, change.new_state)
+            sql = ddl.alter_column(change.table, change.new_state)
             if sql is None:
                 logger.warning(
                     "ALTER COLUMN not supported on %s for %s.%s — "
@@ -557,8 +579,10 @@ class MigrationRunner:
                     change.table,
                     change.column,
                 )
-
             return sql
+
+        elif change.kind == ChangeKind.CREATE_SCHEMA and change.schema:
+            return DDLGenerator(self._current_backend).create_schema(change.schema)
 
         else:
             # DROP_TABLE / DROP_COLUMN — intentionally not auto-generated.
@@ -578,6 +602,8 @@ class MigrationRunner:
         """
         from ryx.executor_helpers import raw_execute
 
+        ddl = self._ddl  # already schema-aware from migrate()
+
         for model in self._models:
             if not hasattr(model, "_meta"):
                 continue
@@ -585,7 +611,6 @@ class MigrationRunner:
             table = meta.table_name
 
             # Only apply if the model belongs to this database
-            # (Basically duplicate the routing logic here or use a helper)
             from ryx.router import get_router
 
             router = get_router()
@@ -600,7 +625,7 @@ class MigrationRunner:
 
             # Named indexes from Meta.indexes
             for idx in meta.indexes:
-                sql = self._ddl.create_index(table, idx)
+                sql = ddl.create_index(table, idx)
                 logger.debug("Index DDL: %s", sql)
                 try:
                     await raw_execute(sql, alias=alias)
@@ -610,7 +635,7 @@ class MigrationRunner:
             # index_together
             for i, fields in enumerate(meta.index_together):
                 name = f"idx_{table}_{'_'.join(fields)}_{i}"
-                sql = self._ddl.create_index_from_fields(table, list(fields), name)
+                sql = ddl.create_index_from_fields(table, list(fields), name)
                 try:
                     await raw_execute(sql, alias=alias)
                 except Exception:
@@ -619,7 +644,7 @@ class MigrationRunner:
             # unique_together
             for i, fields in enumerate(meta.unique_together):
                 name = f"uq_{table}_{'_'.join(fields)}_{i}"
-                sql = self._ddl.create_index_from_fields(
+                sql = ddl.create_index_from_fields(
                     table, list(fields), name, unique=True
                 )
                 try:
@@ -629,7 +654,7 @@ class MigrationRunner:
 
             # CHECK constraints (not supported by all backends)
             for constraint in meta.constraints:
-                sql = self._ddl.add_constraint(table, constraint)
+                sql = ddl.add_constraint(table, constraint)
                 if sql:
                     try:
                         await raw_execute(sql, alias=alias)
@@ -645,6 +670,8 @@ class MigrationRunner:
         from ryx.executor_helpers import raw_execute
         from ryx.migrations.state import TableState, ColumnState
 
+        ddl = self._ddl  # already schema-aware
+
         join_table = getattr(m2m_field, "_join_table", None)
         source_fk = getattr(m2m_field, "_source_fk", None)
         target_fk = getattr(m2m_field, "_target_fk", None)
@@ -653,16 +680,16 @@ class MigrationRunner:
             return
 
         # Build a TableState for the join table
-        tbl = TableState(name=join_table)
+        tbl = TableState(name=join_table, schema=self._schema)
         tbl.add_column(ColumnState("id", "INTEGER", nullable=False, primary_key=True))
         tbl.add_column(ColumnState(source_fk, "INTEGER", nullable=False))
         tbl.add_column(ColumnState(target_fk, "INTEGER", nullable=False))
-        sql = self._ddl.create_table(tbl)
+        sql = ddl.create_table(tbl)
 
         try:
             await raw_execute(sql, alias=alias)
             # Unique constraint on (source_fk, target_fk) to prevent duplicates
-            uq_sql = self._ddl.create_index_from_fields(
+            uq_sql = ddl.create_index_from_fields(
                 join_table,
                 [source_fk, target_fk],
                 f"uq_{join_table}_pair",

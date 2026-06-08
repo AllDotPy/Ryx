@@ -595,6 +595,14 @@ class QuerySet:
         """
         return self._clone(_using=alias)
 
+    def schema(self, schema: str) -> "QuerySet":
+        """Set the database schema for this query (PostgreSQL multi-schema).
+
+        Example::
+            posts = await Post.objects.schema("tenant1").filter(active=True)
+        """
+        return self._with_op("schema", schema)
+
     # Evaluation (async)
     def cache(
         self, *, ttl: Optional[int] = None, key: Optional[str] = None

@@ -5,7 +5,7 @@
 <h1 align="center">Ryx ORM</h1>
 
 <p align="center">
-  <strong>Django-style ORM — Python and Rust. Powered by Rust.</strong>
+  <strong>Django-style ORM for Python and Rust. Powered by a shared Rust SQL engine.</strong>
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
 
 ```python
 import ryx
-from ryx import Model, CharField, Q
+from ryx import Model, BooleanField, CharField, IntField, Q
 
 class Post(Model):
     title  = CharField(max_length=200)
@@ -41,6 +41,7 @@ posts = await Post.objects.filter(Q(active=True) | Q(views__gte=1000))
 
 ```rust
 use ryx_rs::model;
+use ryx_rs::{ObjectsManager, Q};
 
 #[model]
 struct Post {
@@ -50,7 +51,8 @@ struct Post {
     active: bool,
 }
 
-let posts = Post::objects()
+let posts = ObjectsManager::<Post>::new()
+    .all()
     .filter(Q::or(Q::new("active", true), Q::new("views__gte", 1000)))
     .all().await?;
 ```
@@ -68,6 +70,26 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 
 - [Python quick start](https://ryx.alldotpy.com/getting-started/quick-start)
 - [Rust quick start](https://ryx.alldotpy.com/getting-started/installation)
+- [API reference](https://ryx.alldotpy.com/reference/api-reference)
+- [CLI](https://ryx.alldotpy.com/advanced/cli)
+- [Configuration and routing](https://ryx.alldotpy.com/advanced/configuration-and-routing)
+
+## Feature Map
+
+| Area | Python API | Rust API |
+|---|---|---|
+| **Models** | `Model`, `Field`, `Meta`, hooks | `#[model]`, `Model`, `FromRow`, metadata |
+| **Fields** | Auto, integer, numeric, text, date/time, JSON, array, binary, relation fields | Macro-derived field metadata |
+| **Queries** | Lazy async `QuerySet`, `Q`, lookups, transforms, joins, values, annotations | `QuerySet<T>`, `Q`, lookups, values, annotations |
+| **CRUD** | `create`, `save`, `get`, `first`, `count`, `update`, `delete`, `refresh_from_db` | `InsertBuilder`, `all`, `get`, `first`, `count`, `update`, `delete` |
+| **Bulk/streaming** | `bulk_create`, `bulk_update`, `bulk_delete`, chunked/keyset stream | streaming chunks through `QueryStream` |
+| **Transactions** | `async with transaction()` with savepoints | `transaction(|tx| async move { ... })` |
+| **Migrations** | autodetect, DDL generation, runner, CLI | state diffing, DDL generation, runner |
+| **Multi-db** | aliases, `.using()`, `Meta.database`, router, env/config auto-init | aliases, `.using()`, config init |
+| **PostgreSQL schemas** | `.schema()`, schema-aware migrations | `.schema()` |
+| **Caching** | `MemoryCache`, `QuerySet.cache()`, invalidation helpers | cache backend and cached queryset |
+| **Signals/hooks** | pre/post save/delete/update and model hooks | not part of Rust surface |
+| **Raw SQL** | raw fetch/execute and parameterized helpers | backend/query crates |
 
 ## Comparison
 
@@ -76,8 +98,9 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 | **API style** | Schema-first | Verbose builders | **Django-like** |
 | **Q objects (OR/AND/NOT)** | ❌ | ❌ | ✅ |
 | **Lookups** | Basic | Basic | **30+** |
-| **select_related** | ❌ | ✅ (Eager) | ✅ |
+| **select_related** | ❌ | ✅ (Eager) | Rust API; Python currently uses explicit `.join()` |
 | **Migrations** | Diesel CLI | sea-orm-cli | **Built-in** |
+| **PostgreSQL schemas** | ❌ | ❌ | ✅ |
 | **Backends** | PG · MySQL · SQLite | PG · MySQL · SQLite | **PG · MySQL · SQLite** |
 
 ## Architecture

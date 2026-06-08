@@ -115,9 +115,8 @@ pub fn register_custom(
     name: impl Into<String>,
     sql_template: impl Into<String>,
 ) -> QueryResult<()> {
-    let registry = REGISTRY
-        .get()
-        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
+    init_registry();
+    let registry = REGISTRY.get().expect("Lookup registry just initialized");
 
     let mut guard = registry
         .write()
@@ -137,9 +136,8 @@ pub fn register_custom(
 }
 
 fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> QueryResult<String> {
-    let registry = REGISTRY
-        .get()
-        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
+    init_registry();
+    let registry = REGISTRY.get().expect("Lookup registry just initialized");
 
     let guard = registry
         .read()
@@ -162,9 +160,8 @@ fn resolve_simple(field: &str, lookup_name: &str, ctx: &LookupContext) -> QueryR
 /// Returns the list of all registered lookup names (built-in + custom).
 /// Used by the Python layer for available_lookups().
 pub fn registered_lookups() -> QueryResult<Vec<String>> {
-    let registry = REGISTRY
-        .get()
-        .ok_or_else(|| QueryError::Internal("Lookup registry not initialized".into()))?;
+    init_registry();
+    let registry = REGISTRY.get().expect("Lookup registry just initialized");
 
     let guard = registry
         .read()

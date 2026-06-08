@@ -4,51 +4,259 @@ sidebar_position: 6
 
 # Migrations
 
-Ryx can detect your models and create database tables automatically.
+Ryx provides a complete migration system for Rust: live auto-diff, file-based YAML migrations with per-database routing, and a CLI for every workflow.
 
-## Basic Usage
+## Two Approaches
+
+### Live Migration (No Files)
+
+Best for prototyping and simple projects. Introspects the DB, diffs against models, and applies DDL directly:
 
 ```rust
 use ryx_rs::migration::MigrationRunner;
 
 MigrationRunner::new()
-    .model::<Author>()
+    .live(true)
     .model::<Post>()
+    .model::<Author>()
     .run().await?;
 ```
 
-This introspects your database, diffs against your model definitions, and generates the necessary DDL (CREATE TABLE, ALTER COLUMN, etc.).
+Set `.live(true)` to skip file discovery and apply changes directly. Omitting it enters the file-based pipeline (see below).
+
+### File-Based YAML Migrations
+
+Best for production and team projects. Migration files are plain YAML, discovered recursively, and tracked per-database alias:
+
+```bash
+# Generate migration files (coming soon — use Python for now)
+ryx makemigrations --dir migrations/
+
+# Apply pending migrations
+ryx migrate --dir migrations/
+
+# Preview SQL
+ryx sqlmigrate 0001_initial --dir migrations/ --backends postgres,mysql,sqlite
+
+# Check status
+ryx showmigrations --dir migrations/
+```
+
+## CLI Reference
+
+```bash
+ryx migrate   [--dir DIR] [--database ALIAS] [--dry-run] [--no-interactive]
+ryx makemigrations --dir DIR [--alias ALIAS] [--check]
+ryx showmigrations [--dir DIR] [--unapplied]
+ryx sqlmigrate NAME [--dir DIR] [--backends postgres,mysql,sqlite]
+```
+
+The CLI uses ANSI colours when the terminal supports it. Set `NO_COLOR=1` to disable, or pipe output.
 
 ## How It Works
 
 ```
-1. Introspect live DB schema   → SchemaState (current)
-2. Build target from models    → SchemaState (desired)
-3. Diff the two states         → List of changes
-4. Generate DDL                → CREATE / ALTER statements
-5. Execute                     → Apply to database
+1. Discover all [0-9]*.yaml files recursively   → sorted by numeric prefix
+2. For each DB alias, filter operations          → via operation.database()
+3. Convert operations to backend-aware DDL        → DDLGenerator
+4. Execute statements                             → per-backend SQL
+5. Track applied state                            → alias|stem in ryx_migrations
 ```
 
-## What Migrations Handle
+When no migration files exist, `ryx migrate` offers an **interactive menu**:
 
-- Creating and dropping tables
-- Adding, altering, and dropping columns
-- Creating and dropping indexes
-- Adding constraints
-- Creating ManyToMany join tables
+```
+[ryx] No migration files exist for database 'default'
+  2 model(s) are not yet tracked.
 
-## Tracking
+  [L]ive DDL — apply changes directly (development only)
+  [A]uto-generate migration files, then migrate
+  [M]anual — run 'ryx makemigrations' first
+  [S]kip this database for now
 
-Ryx creates a `ryx_migrations` table to track applied state.
+[ryx] Choice (L/A/M/S) [S]:
+```
+
+Use `--no-interactive` to skip the prompt in scripts or CI/CD (prints a hint and exits).
+
+## Multi-Database Routing
+
+Each model declares its database alias with `#[database("alias")]`:
+
+```rust
+#[model]
+#[database("blog")]
+#[table("posts")]
+struct Post {
+    #[field(pk)] id: i64,
+    title: String,
+}
+
+#[model]
+#[database("shop")]
+#[table("products")]
+struct Product {
+    #[field(pk)] id: i64,
+    name: String,
+}
+```
+
+The migration runner filters operations per alias automatically. The tracking table stores `alias|stem` keys:
+
+| Column | Type | Example |
+|---|---|---|
+| id | INTEGER | 1 |
+| name | TEXT | `default\|0001_initial` |
+| applied_at | TIMESTAMP | 2025-06-03 12:00:00 |
+
+Legacy entries (bare stems without `|`) are still recognised for backward compatibility.
+
+## YAML File Format
+
+Migration files are human-readable YAML, one file per migration:
+
+```yaml
+# migrations/0001_initial.yaml
+dependencies: []
+operations:
+  - type: CreateTable
+    table_name: authors
+    model_name: myapp::Author
+    database: default
+    columns:
+      - { name: id, db_type: INTEGER, pk: true, unique: true }
+      - { name: name, db_type: VARCHAR(100), nullable: false }
+
+  - type: CreateTable
+    table_name: posts
+    model_name: myapp::Post
+    database: blog
+    columns:
+      - { name: id, db_type: INTEGER, pk: true, unique: true }
+      - { name: title, db_type: VARCHAR(200), nullable: false }
+      - { name: author_id, db_type: INTEGER, nullable: false }
+```
+
+Supported operation types: `CreateTable`, `AddField`, `RemoveField`, `AlterField`, `CreateIndex`, `DeleteIndex`, `RunSQL`.
+
+## Programmatic API
+
+### MigrationRunner (Builder)
+
+```rust
+use ryx_rs::migration::MigrationRunner;
+
+// File-based (default)
+MigrationRunner::new()
+    .model::<Post>()
+    .migrations_dir("migrations/")
+    .db("blog")
+    .dry_run(true)
+    .run().await?;
+
+// Live mode — skip file discovery
+MigrationRunner::new()
+    .live(true)
+    .model::<Post>()
+    .run().await?;
+
+// Live mode with schema (PostgreSQL multi-schema)
+MigrationRunner::new()
+    .live(true)
+    .model::<Post>()
+    .schema("tenant1")
+    .run().await?;
+
+// Preview only
+let sql: Vec<String> = MigrationRunner::new()
+    .model::<Post>()
+    .plan().await?;
+```
+
+### FileRunner (Programmatic)
+
+```rust
+use ryx_rs::migration::runner::FileRunner;
+
+let runner = FileRunner::new()
+    .model::<Post>()
+    .migrations_dir("migrations/")
+    .no_interactive(true);
+
+let statements: Vec<String> = runner.run().await?;
+```
+
+### DDLGenerator
+
+```rust
+use ryx_rs::migration::ddl::DDLGenerator;
+use ryx_query::Backend;
+
+let ddl = DDLGenerator::new(Backend::PostgreSQL);
+
+let sql = ddl.create_table(&table_state);
+let sql = ddl.drop_table("posts");
+let sql = ddl.add_column("posts", &col_state);
+let sql = ddl.create_index("posts", "idx_title", &["title".into()], false);
+let sql = ddl.add_foreign_key("posts", "fk_author", "author_id", "authors", "id");
+
+// Bulk generation from SchemaChange list
+let all_sql = ddl.generate(&changes);
+```
+
+### Autodetector (Generate YAML files)
+
+```rust
+use ryx_rs::migration::autodetect::{Autodetector, ModelEntry};
+
+let entries = vec![
+    ModelEntry::from_model::<Author>(),
+    ModelEntry::from_model::<Post>(),
+];
+
+let detector = Autodetector::new(entries, "migrations/");
+
+// Detect changes → write migration file
+if let Some(path) = detector.run()? {
+    println!("Created {}", path.display());
+}
+
+// Or step-by-step
+let ops = detector.detect();
+if !ops.is_empty() {
+    detector.write_migration(&ops)?;
+}
+```
+
+## File Discovery
+
+Migration files are discovered **recursively** under the migrations directory. Files matching `[0-9]*.yaml` or `[0-9]*.yml` are found and sorted globally by numeric prefix:
+
+```
+migrations/
+├── 0001_initial.yaml
+├── 0002_add_views.yaml
+├── blog/
+│   ├── 0001_blog_tables.yaml
+│   └── 0002_add_tags.yaml
+└── shop/
+    └── 0001_shop_tables.yaml
+```
+
+Files in subdirectories are found automatically — no per-alias configuration needed.
 
 ## Backend Differences
 
 | Feature | PostgreSQL | MySQL | SQLite |
 |---|---|---|---|
-| `ALTER COLUMN` | Yes | Yes | No (recreate) |
+| `ALTER COLUMN` | `ALTER COLUMN ... TYPE` | `MODIFY COLUMN` | Manual rebuild required |
+| `IF NOT EXISTS` / `IF EXISTS` | Yes | Yes | Yes |
+| `DROP COLUMN` | Yes | Yes | Not supported (comment) |
 | Native UUID | Yes | No | No |
-| `SERIAL` | Yes | No | No |
+| `SERIAL` | `BIGSERIAL` | `INT AUTO_INCREMENT` | `INTEGER PRIMARY KEY AUTOINCREMENT` |
+| **Database schemas** | **`"schema"."table"`** | No | No |
 
 ## Next Steps
 
-- **[Querying](/rust/querying/filtering)** — Start querying your data
+- **[Models](./models)** — Define models with `#[model]`
+- **[Querying](../querying/filtering)** — Start querying your data

@@ -1,0 +1,292 @@
+---
+sidebar_position: 99
+---
+
+# Rust API Reference
+
+The Rust API lives in `ryx-rs` and reuses the shared crates:
+
+- `ryx-query` for query AST, lookups, and SQL compilation
+- `ryx-backend` for sqlx-backed PostgreSQL, MySQL, and SQLite execution
+- `ryx-common` for shared errors, pool config, and SQL values
+- `ryx-macro` for model derive and attribute macros
+
+## Initialization
+
+```rust
+use ryx_rs::{init, RyxResult};
+
+#[tokio::main]
+async fn main() -> RyxResult<()> {
+    init().await?;
+    Ok(())
+}
+```
+
+`init()` loads config files and environment variables, initializes tracing from
+`RYX_LOG_LEVEL`, and initializes the global pool if configuration is present.
+
+## Model Macros
+
+```rust
+use ryx_rs::model;
+
+#[model]
+struct Post {
+    #[field(pk)]
+    id: i64,
+    title: String,
+    views: i64,
+    active: bool,
+}
+```
+
+The public model traits are:
+
+| Trait | Purpose |
+|---|---|
+| `Model` | Table name, field names, primary key, field metadata, database alias |
+| `FromRow` | Convert decoded backend rows into model instances |
+| `Relationships` | Optional relationship metadata for `select_related()` |
+
+## Objects Manager
+
+```rust
+use ryx_rs::ObjectsManager;
+
+let posts = ObjectsManager::<Post>::new().all().all().await?;
+let active = ObjectsManager::<Post>::new().filter("active", true).all().await?;
+let post = ObjectsManager::<Post>::new().all().get("id", 1).await?;
+
+let created = ObjectsManager::<Post>::new()
+    .create()
+    .set("title", "Hello")
+    .set("views", 0)
+    .set("active", true)
+    .save()
+    .await?;
+```
+
+`ObjectsManager::<T>::new()` exposes:
+
+| Method | Purpose |
+|---|---|
+| `.all()` | Start a `QuerySet<T>` |
+| `.filter(field, value)` | Start a filtered queryset |
+| `.exclude(field, value)` | Start an excluded queryset |
+| `.get(field, value)` | Start a queryset filtered for `get()` |
+| `.create()` | Start an `InsertBuilder<T>` |
+
+## QuerySet
+
+```rust
+let posts = ObjectsManager::<Post>::new()
+    .all()
+    .filter(("views__gte", 100))
+    .exclude(("active", false))
+    .order_by("-views")
+    .limit(20)
+    .offset(40)
+    .all()
+    .await?;
+```
+
+Query building:
+
+| Method | Purpose |
+|---|---|
+| `.using(alias)` | Force a database alias |
+| `.schema(schema)` | Target a PostgreSQL schema |
+| `.filter(arg)` | Add a field lookup or `Q` object |
+| `.exclude(arg)` | Add a negated field lookup or negated `Q` |
+| `.order_by(field)` | Add one ordering clause |
+| `.order_by_all(fields)` | Add multiple ordering clauses |
+| `.limit(n)` | Add `LIMIT` |
+| `.offset(n)` | Add `OFFSET` |
+| `.distinct()` | Add `DISTINCT` |
+| `.sql()` | Return compiled SQL for debugging |
+
+Execution:
+
+| Method | Return |
+|---|---|
+| `.all().await` | `RyxResult<Vec<T>>` |
+| `.get(field, value).await` | `RyxResult<T>` |
+| `.first().await` | `RyxResult<Option<T>>` |
+| `.count().await` | `RyxResult<i64>` |
+| `.exists().await` | `RyxResult<bool>` |
+| `.update(vec![...]).await` | `RyxResult<u64>` |
+| `.delete().await` | `RyxResult<u64>` |
+
+## Q Objects
+
+```rust
+use ryx_rs::Q;
+
+let q = Q::or(
+    Q::new("active", true),
+    Q::and(Q::new("views__gte", 1000), Q::not("title__icontains", "draft")),
+);
+
+let posts = ObjectsManager::<Post>::new().all().filter(q).all().await?;
+```
+
+Supported constructors:
+
+```rust
+Q::new(field, value)
+Q::not(field, value)
+Q::and(a, b)
+Q::or(a, b)
+Q::negate(q)
+```
+
+## Aggregates
+
+```rust
+use ryx_rs::agg::{avg, count, count_distinct, max, min, sum};
+
+let stats = ObjectsManager::<Post>::new()
+    .all()
+    .filter(("active", true))
+    .aggregate(&[
+        count("total", "id"),
+        sum("total_views", "views"),
+        avg("avg_views", "views"),
+        min("min_views", "views"),
+        max("max_views", "views"),
+        count_distinct("authors", "author_id"),
+    ])
+    .await?;
+```
+
+`aggregate()` returns `HashMap<String, SqlValue>`.
+
+## Values and Annotations
+
+```rust
+let rows = ObjectsManager::<Post>::new()
+    .all()
+    .values(&["id", "title", "views"])
+    .await?;
+
+let lists = ObjectsManager::<Post>::new()
+    .all()
+    .values_list(&["id", "title"])
+    .await?;
+
+let annotated = ObjectsManager::<Post>::new()
+    .all()
+    .annotate(&[count("comment_count", "id")])
+    .await?;
+```
+
+These methods return decoded maps/lists instead of model instances.
+
+## Relationships
+
+`select_related()` is available when the model implements `Relationships`.
+
+```rust
+let posts = ObjectsManager::<Post>::new()
+    .all()
+    .select_related(&["author"])
+    .all()
+    .await?;
+```
+
+Relationship metadata is described by `RelationMeta`:
+
+```rust
+RelationMeta {
+    name: "author",
+    fk_column: "author_id",
+    to_table: "authors",
+    to_field: "id",
+    relation_fields: &["id", "name"],
+}
+```
+
+## Caching and Streaming
+
+```rust
+use ryx_rs::cache::{configure_cache, MemoryCache};
+
+configure_cache(MemoryCache::new(300, 5000));
+
+let posts = ObjectsManager::<Post>::new()
+    .all()
+    .filter(("active", true))
+    .cache(60, Some("active_posts".to_string()))
+    .all()
+    .await?;
+```
+
+Streaming:
+
+```rust
+let mut stream = ObjectsManager::<Post>::new()
+    .all()
+    .order_by("id")
+    .stream(100, Some("id"));
+
+while let Some(chunk) = stream.next_chunk().await? {
+    for post in chunk {
+        // process post
+    }
+}
+```
+
+## Transactions
+
+```rust
+use ryx_rs::transaction;
+
+transaction(|tx| async move {
+    ObjectsManager::<Post>::new()
+        .create()
+        .set("title", "Inside transaction")
+        .set("views", 0)
+        .set("active", true)
+        .save()
+        .await?;
+    tx.commit().await?;
+    Ok(())
+})
+.await?;
+```
+
+Transactions use the backend transaction support and route through the current
+pool alias.
+
+## Migrations
+
+Rust migration support is exposed through `ryx_rs::migration`:
+
+```rust
+use ryx_rs::migration::{
+    Autodetector, DDLGenerator, MigrationRunner,
+    SchemaState, TableState, ColumnState,
+    diff_states, generate_ddl,
+};
+```
+
+Core operations include schema introspection, state diffing, DDL generation,
+migration file handling, and runner execution.
+
+## Re-exports
+
+Commonly used re-exports:
+
+```rust
+use ryx_rs::{
+    Model, FromRow, model,
+    Model as ModelTrait,
+    QuerySet, Q,
+    ObjectsManager, InsertBuilder,
+    PoolConfig, RyxError, RyxResult, SqlValue,
+};
+```
+
+The derive macro `Model` and the trait `Model` share the same public name in
+different namespaces. In larger modules, alias the trait import if needed.

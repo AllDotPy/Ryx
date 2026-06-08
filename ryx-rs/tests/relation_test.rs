@@ -72,6 +72,7 @@ async fn test_select_related_basic() {
 
     // Create tables
     MigrationRunner::new()
+        .live(true)
         .model::<RelAuthor>()
         .model::<RelPost>()
         .run()

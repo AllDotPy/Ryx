@@ -392,12 +392,14 @@ def event_loop():
 
 
 def pytest_collection_modifyitems(config, items):
-    """Add setup_database fixture to all integration test items."""
+    """Add setup_database and clean_tables fixtures to all integration test items."""
     for item in items:
         if "integration" in str(item.fspath):
-            # Ensure the fixture is added to the test
+            # Ensure the fixtures are added to the test
             if "setup_database" not in item.fixturenames:
                 item.fixturenames.insert(0, "setup_database")
+            if "clean_tables" not in item.fixturenames:
+                item.fixturenames.insert(0, "clean_tables")
 
 
 @pytest.fixture(scope="session")
@@ -505,7 +507,7 @@ class Profile(Model):
     data = JSONField(null=True)
 
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 async def clean_tables():
     """Clean all test tables before each test."""
     tables = ["test_posts", "test_authors", "test_tags", "test_post_tags"]

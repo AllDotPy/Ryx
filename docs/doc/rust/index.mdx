@@ -8,7 +8,7 @@ slug: /rust
 Ryx is a Django-style ORM for Rust. Async-native, with zero Python dependencies.
 
 ```rust
-use ryx_rs::model;
+use ryx_rs::{model, ObjectsManager};
 
 #[model]
 struct Post {
@@ -19,10 +19,22 @@ struct Post {
     active: bool,
 }
 
-let posts = Post::objects()
+let posts = ObjectsManager::<Post>::new()
     .filter("active", true)
     .order_by("-views")
     .all().await?;
+```
+
+Many older snippets use a convenience helper named `Post::objects()`. The macro
+does not need that helper; the canonical entry point is
+`ObjectsManager::<Post>::new()`. If you prefer the shorter style, define it once:
+
+```rust
+impl Post {
+    fn objects() -> ObjectsManager<Self> {
+        ObjectsManager::new()
+    }
+}
 ```
 
 ## Crates
@@ -37,12 +49,15 @@ let posts = Post::objects()
 | Feature | Python (ryx) | Rust (ryx-rs) |
 |---|---|---|
 | Model definition | Class + Fields | `#[model]` struct |
-| QuerySet | `Post.objects` | `Post::objects()` |
+| QuerySet | `Post.objects` | `ObjectsManager::<Post>::new()` or a user-defined `Post::objects()` helper |
 | Filtering | `.filter(active=True)` | `.filter("active", true)` |
 | Q objects | `Q(active=True) \| Q(...)` | `Q::or(Q::new(...), ...)` |
 | Create | `.create(title="...")` | `.create().set("title", "...").save()` |
 | Migrations | `MigrationRunner([Post])` | `MigrationRunner::new().model::<Post>()` |
 | Relations | `ForeignKey(Author)` | `#[relation(model = "Author", ...)]` |
+| CLI | `python -m ryx migrate` | `ryx migrate` |
+| File-based migrations | `.py` files + Autodetector | `.yaml` files + Autodetector |
+| Multi-DB routing | `Meta.database` + `model=` | `#[database("alias")]` |
 
 ## Next Steps
 

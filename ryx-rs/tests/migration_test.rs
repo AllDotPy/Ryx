@@ -102,6 +102,8 @@ async fn sequential_migration_tests() {
 
     // Test 1: create table
     MigrationRunner::new()
+        .live(true)
+        .live(true)
         .model::<Post>()
         .run()
         .await
@@ -114,6 +116,7 @@ async fn sequential_migration_tests() {
 
     // Test 2: add column
     MigrationRunner::new()
+        .live(true)
         .model::<PostV2>()
         .run()
         .await
@@ -125,6 +128,7 @@ async fn sequential_migration_tests() {
 
     // Test 3: multiple models
     MigrationRunner::new()
+        .live(true)
         .model::<Author>()
         .run()
         .await
@@ -133,6 +137,7 @@ async fn sequential_migration_tests() {
 
     // Test 4: idempotent
     MigrationRunner::new()
+        .live(true)
         .model::<PostV2>()
         .model::<Author>()
         .run()

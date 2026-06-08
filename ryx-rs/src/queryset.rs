@@ -69,6 +69,16 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
+    /// Set the database schema for this query (PostgreSQL multi-schema).
+    ///
+    /// ```ignore
+    /// Post::objects().schema("tenant1").all().await?;
+    /// ```
+    pub fn schema(mut self, schema: &str) -> Self {
+        self.node = self.node.with_schema(schema);
+        self
+    }
+
     // === FILTERS ===
 
     /// Add a filter condition.

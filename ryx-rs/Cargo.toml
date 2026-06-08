@@ -22,6 +22,7 @@ tracing-subscriber = { workspace = true }
 toml = { workspace = true, optional = true }
 serde_yaml = { workspace = true, optional = true }
 redis = { version = "0.28", optional = true, features = ["tokio-comp"] }
+clap = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
@@ -29,6 +30,11 @@ criterion = { version = "0.5", features = ["async_tokio"] }
 [[bench]]
 name = "orm_bench"
 harness = false
+
+[[bin]]
+name = "ryx"
+path = "src/main.rs"
+required-features = ["config"]
 
 [features]
 default = ["config"]

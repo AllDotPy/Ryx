@@ -6,6 +6,8 @@ description: Learn how to route queries across multiple databases in Ryx.
 
 Ryx supports routing queries across multiple databases, allowing you to separate read and write workloads, split data across different servers, or use a dedicated database for specific models.
 
+> **Also see**: [PostgreSQL Multi-Schema](./postgres-multi-schema) for schema-per-tenant isolation within a single database.
+
 ## Configuration
 
 To enable multi-database support, provide a dictionary of URLs to `ryx_core.setup` instead of a single string. Each key in the dictionary serves as an **alias** for that database pool.

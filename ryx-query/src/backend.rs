@@ -17,6 +17,12 @@ impl Backend {
             Backend::SQLite => "sqlite",
         }
     }
+
+    /// Whether this backend supports PostgreSQL-style schemas
+    /// (namespaced tables within a single database).
+    pub const fn supports_schemas(&self) -> bool {
+        matches!(self, Backend::PostgreSQL)
+    }
 }
 
 /// Detect the backend from a database URL.

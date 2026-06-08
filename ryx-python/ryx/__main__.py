@@ -15,14 +15,20 @@ Commands:
   inspectdb         Introspect an existing database and print model stubs
 
 Configuration is read from (in order of precedence):
-  1. CLI flags (--url, --settings, --config, --env)
+  1. CLI flags (--url, --settings, --config, --env, --alias, --no-interactive)
   2. Config file (ryx.yaml/yml/toml if --config specified or in current dir)
   3. RYX_DATABASE_URL environment variable
   4. ryx_settings.py in the current directory
 
+CLI output uses ANSI colors (auto-disabled when NO_COLOR is set or
+stdout is not a TTY).
+
 Usage examples:
   python -m ryx migrate --url postgres://user:pass@localhost/mydb
+  python -m ryx migrate --alias blog                              # per-DB
+  python -m ryx migrate --no-interactive                          # CI/CD
   python -m ryx makemigrations --models myapp.models --dir migrations/
+  python -m ryx makemigrations --models myapp.models --check      # check mode
   python -m ryx shell --url sqlite:///dev.db
   python -m ryx showmigrations
   python -m ryx version
@@ -116,6 +122,9 @@ def _build_parser() -> argparse.ArgumentParser:
     m.add_argument(
         "--plan", action="store_true", help="Show migration plan without executing"
     )
+    m.add_argument(
+        "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)"
+    )
     m.set_defaults(func=cmd_migrate)
 
     # makemigrations
@@ -147,6 +156,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sq = sub.add_parser("sqlmigrate", help="Print SQL for a migration (dry run)")
     sq.add_argument("name", help="Migration name (e.g. 0001_initial)")
     sq.add_argument("--dir", default="migrations", metavar="DIR")
+    sq.add_argument(
+        "--schema", metavar="SCHEMA", help="Database schema (PostgreSQL multi-schema)"
+    )
     sq.set_defaults(func=cmd_sqlmigrate)
 
     # flush
@@ -195,6 +207,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ins.add_argument("--table", metavar="TABLE", help="Inspect only this table")
     ins.add_argument("--output", "-o", metavar="FILE", help="Write output to file")
+    ins.add_argument(
+        "--schema", metavar="SCHEMA", default="public", help="Database schema to introspect (default: public)"
+    )
     ins.set_defaults(func=cmd_inspectdb)
 
     return p

@@ -6,6 +6,7 @@ from pathlib import Path
 from ryx.cli.commands.base import Command
 from ryx.cli.config import get_config
 from ryx.cli.config_context import resolve_config
+from ryx.cli.style import PREFIX, OK, WARN, cyan, green, yellow, red
 
 
 class ShowMigrationsCommand(Command):
@@ -29,15 +30,14 @@ class ShowMigrationsCommand(Command):
     async def execute(self, args: argparse.Namespace) -> int:
         mig_dir = Path(args.dir)
         if not mig_dir.exists():
-            print(f"[ryx] No migrations directory found at: {mig_dir}")
+            print(f"{PREFIX} {red('No migrations directory found at:')} {cyan(str(mig_dir))}")
             return 1
 
-        files = sorted(mig_dir.glob("[0-9]*.py"))
+        files = sorted(mig_dir.rglob("[0-9]*.py"))
         if not files:
-            print("[ryx] No migrations found.")
+            print(f"{PREFIX} {WARN} No migrations found.")
             return 0
 
-        # Try to check which are applied (requires DB connection)
         applied = set()
         cfg = getattr(args, "resolved_config", None) or resolve_config(args)
         urls = cfg.urls
@@ -55,12 +55,13 @@ class ShowMigrationsCommand(Command):
             except Exception:
                 pass
 
-        print(f"\nMigrations in {mig_dir}:")
+        print(f"\n{PREFIX} Migrations in {cyan(str(mig_dir))}:")
         for f in files:
-            status = "✓ applied" if f.stem in applied else "  pending"
-            if getattr(args, "unapplied", False) and f.stem in applied:
+            is_applied = f.stem in applied or any(entry.endswith(f"|{f.stem}") for entry in applied)
+            status = f"{OK} {green(f.stem)}" if is_applied else f"  {yellow(f.stem)}"
+            if getattr(args, "unapplied", False) and is_applied:
                 continue
-            print(f"  [{status}]  {f.stem}")
+            print(f"  [{status}]")
         print()
 
         return 0

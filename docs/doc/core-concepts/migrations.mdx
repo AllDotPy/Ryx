@@ -4,7 +4,17 @@ sidebar_position: 5
 
 # Migrations
 
-Ryx can introspect your database, detect schema changes, and generate DDL automatically.
+Ryx can introspect your database, detect schema changes, and generate DDL automatically — with full multi-database routing and colored CLI output.
+
+## CLI in Action
+
+The CLI uses ANSI colors on supported terminals (macOS, Linux). Colors auto-disable when `NO_COLOR` is set or output is piped:
+
+```
+  [ryx]  ✓ 0001_initial              ← bold blue prefix, green check
+  [ryx]  ⚠ No migration files exist   ← yellow warning
+  [ryx]  Skipped database blog         ← yellow "Skipped", magenta alias
+```
 
 ## Two Approaches
 
@@ -47,15 +57,100 @@ python -m ryx showmigrations \
     --dir migrations/
 ```
 
-## How It Works
+## Migration File Format
+
+Generated migration files are clean, multi-line Python with **model class references** for automatic database routing:
+
+```python
+from myapp.models import Author, Post
+from ryx.migrations.autodetect import CreateTable, AddField, ColumnState
+
+Migration = [
+    CreateTable(
+        table='authors',
+        columns=[
+            ColumnState(name='id', db_type='INTEGER', primary_key=True, unique=True),
+            ColumnState(name='name', db_type='VARCHAR(100)'),
+        ],
+        model=Author,
+    ),
+    CreateTable(
+        table='posts',
+        columns=[
+            ColumnState(name='id', db_type='INTEGER', primary_key=True, unique=True),
+            ColumnState(name='title', db_type='VARCHAR(200)'),
+            ColumnState(name='author_id', db_type='INTEGER'),
+        ],
+        model=Post,
+    ),
+    AddField(
+        table='posts',
+        column=ColumnState(name='views', db_type='INTEGER', nullable=False),
+        model=Post,
+    ),
+]
+```
+
+Key features:
+- Each operation embeds the **Model class** (`model=Author`) so the runner knows which database it belongs to via `model._meta.database`
+- Models are imported at the top of the file (`from myapp.models import Author`)
+- Output is indented and readable, one argument per line
+- Backward compatible — legacy files without `model=` still work
+
+## File Discovery
+
+Migration files are discovered **recursively** under the migrations directory. All files matching `[0-9]*.py` are found, sorted globally by numeric prefix:
 
 ```
-1. Introspect live DB schema → SchemaState (current)
-2. Build target from Models → SchemaState (desired)
-3. Diff the two states      → List of changes
-4. Generate DDL             → CREATE TABLE, ALTER COLUMN, etc.
-5. Execute                  → Apply to database
+migrations/
+├── 0001_initial.py
+├── 0002_add_views.py
+├── blog/
+│   ├── 0001_blog_tables.py
+│   └── 0002_add_tags.py
+└── shop/
+    └── 0001_shop_tables.py
 ```
+
+Files in subdirectories are found automatically — no per-alias configuration needed.
+
+## Multi-Database Routing
+
+When using multiple databases, each operation knows its target database from the embedded Model class. The runner:
+
+1. Discovers **all** migration files recursively
+2. For each database alias, filters operations whose `model._meta.database` matches
+3. Applies only relevant operations per alias
+4. Tracks applied state as `alias|stem` in `ryx_migrations`
+
+```bash
+# Apply only to the "blog" alias
+python -m ryx migrate --database blog
+
+# Target a specific PostgreSQL schema (schema-per-tenant)
+python -m ryx migrate --schema tenant1
+
+# Non-interactive mode (for CI/CD)
+python -m ryx migrate --no-interactive
+```
+
+## Interactive Fallback
+
+When no migration files exist yet, `ryx migrate` offers an interactive menu:
+
+```
+  [ryx]  ⚠ No migration files exist for database default
+         3 model(s) are not yet tracked.
+
+  L)ive DDL — apply changes directly (development only)
+  A)uto-generate migration files, then migrate
+  M)anual — run ryx makemigrations first
+  S)kip this database for now
+
+  [ryx] Choice [S]:
+```
+
+Use `--no-interactive` to skip this prompt in scripts or CI/CD (exits with a hint instead).
 
 ## Migration Tracking
 
@@ -64,8 +159,10 @@ Ryx creates a `ryx_migrations` table to track applied migrations:
 | Column | Type |
 |---|---|
 | `id` | INTEGER |
-| `name` | TEXT |
+| `name` | TEXT (`alias|stem` format) |
 | `applied_at` | TIMESTAMP |
+
+Applied entries use `alias|stem` (e.g. `default|0001_initial`, `blog|0001_blog_tables`). Legacy bare-stem entries are still recognized for backward compatibility.
 
 ## What Migrations Handle
 
@@ -97,12 +194,13 @@ print(gen.add_column("posts", column_state))
 ## Backend Differences
 
 | Feature | PostgreSQL | MySQL | SQLite |
-|---|---|---|---|
+|---|---|---|---|---|
 | `ALTER COLUMN` | Yes | Yes | No (recreate table) |
 | Native UUID | Yes | No | No |
 | `SERIAL` | Yes | No | No |
 | `JSONB` | Yes | No | No |
 | Array types | Yes | No | No |
+| **Database schemas** | **`"schema"."table"`** | No | No |
 
 ## Next Steps
 

@@ -84,9 +84,11 @@ class TableState:
 
     Attributes:
         name:    The table name.
+        schema:  Database schema (PostgreSQL). Empty string = default schema.
         columns: Ordered dict of column_name → ColumnState.
     """
     name: str
+    schema: str = ""
     columns: Dict[str, ColumnState] = field(default_factory=dict)
 
     def add_column(self, col: ColumnState) -> None:
@@ -127,14 +129,17 @@ class SchemaState:
         """
         data = {
             table_name: {
-                col_name: {
-                    "db_type": col.db_type,
-                    "nullable": col.nullable,
-                    "primary_key": col.primary_key,
-                    "unique": col.unique,
-                    "default": col.default,
-                }
-                for col_name, col in table.columns.items()
+                "_schema": table.schema,
+                "columns": {
+                    col_name: {
+                        "db_type": col.db_type,
+                        "nullable": col.nullable,
+                        "primary_key": col.primary_key,
+                        "unique": col.unique,
+                        "default": col.default,
+                    }
+                    for col_name, col in table.columns.items()
+                },
             }
             for table_name, table in self.tables.items()
         }
@@ -145,9 +150,10 @@ class SchemaState:
         """Deserialize a SchemaState from a JSON string."""
         state = cls()
         data = json.loads(raw)
-        for table_name, columns in data.items():
-            table = TableState(name=table_name)
-            for col_name, col_data in columns.items():
+        for table_name, table_data in data.items():
+            columns_data = table_data.get("columns", table_data)
+            table = TableState(name=table_name, schema=table_data.get("_schema", ""))
+            for col_name, col_data in columns_data.items():
                 table.add_column(ColumnState(
                     name = col_name,
                     db_type = col_data["db_type"],
@@ -172,6 +178,7 @@ class ChangeKind(Enum):
     ALTER_COLUMN = auto()
     ADD_INDEX = auto()
     DROP_INDEX = auto()
+    CREATE_SCHEMA = auto()
 
 
 ###
@@ -184,15 +191,17 @@ class SchemaChange:
     Produced by ``diff_states()`` and consumed by ``MigrationRunner``.
 
     Attributes:
-        kind:       What kind of change this is.
-        table:      The table being modified.
-        column:     The column being modified (None for table-level changes).
-        old_state:  The before-state (None for CREATE operations).
-        new_state:  The after-state (None for DROP operations).
+        kind:        What kind of change this is.
+        table:       The table being modified.
+        schema:      Database schema (PostgreSQL). Empty = default.
+        column:      The column being modified (None for table-level changes).
+        old_state:   The before-state (None for CREATE operations).
+        new_state:   The after-state (None for DROP operations).
         description: Human-readable description for migration output.
     """
     kind: ChangeKind
     table: str
+    schema: str = ""
     column: Optional[str] = None
     old_state: Optional[ColumnState] = None
     new_state: Optional[ColumnState] = None
@@ -206,45 +215,52 @@ class SchemaChange:
 def diff_states(current: SchemaState, target: SchemaState) -> List[SchemaChange]:
     """Compute the list of changes needed to bring ``current`` to ``target``.
 
-    Args:
-        current: The state the database is in right now.
-        target:  The state the models say the database should be in.
-
-    Returns:
-        An ordered list of SchemaChange objects. Apply them in order to
-        migrate the database from ``current`` to ``target``.
-
-    Design:
-        We do a simple set-based diff:
-        - Tables in target but not current → CREATE TABLE
-        - Tables in current but not target → we intentionally do NOT drop
-          them automatically (dangerous). Instead we emit a warning.
-        - Columns in target table but not current table → ADD COLUMN
-        - Columns in current table but not target table → emit a warning
-          (dropping columns is destructive and should be explicit).
-        - Columns in both but with different definitions → ALTER COLUMN
+    Tables are matched by composite key ``(schema, name)``. Schemas that
+    exist in the target but not in the current state get a ``CREATE_SCHEMA``
+    change (for PostgreSQL multi-schema support).
     """
     changes: List[SchemaChange] = []
 
-    # Tables to create 
+    # Detect schemas in target but not in current → CreateSchema
+    target_schemas = {t.schema for t in target.tables.values()}
+    current_schemas = {t.schema for t in current.tables.values()}
+    for schema in target_schemas - current_schemas:
+        if schema:
+            changes.append(SchemaChange(
+                kind=ChangeKind.CREATE_SCHEMA,
+                table="",
+                schema=schema,
+                description=f"Create schema '{schema}'",
+            ))
+
+    # Helper: find table by composite key
+    def _find(state, table_name, schema):
+        for t in state.tables.values():
+            if t.name == table_name and (t.schema or "") == (schema or ""):
+                return t
+        return None
+
+    # Tables to create (in target but not in current)
     for table_name, target_table in target.tables.items():
-        if not current.has_table(table_name):
+        current_table = _find(current, table_name, target_table.schema)
+        if current_table is None:
             changes.append(SchemaChange(
                 kind=ChangeKind.CREATE_TABLE,
                 table=table_name,
-                new_state=None,  # full table — see runner for DDL generation
-                description=f"Create table '{table_name}'",
+                schema=target_table.schema,
+                new_state=None,
+                description=f"Create table '{table_name}' in schema '{target_table.schema or 'default'}'",
             ))
             # All columns in this new table are implicitly "added" by CREATE TABLE
             continue
 
-        #  Columns to add or alter
-        current_table = current.tables[table_name]
+        # Columns to add or alter
         for col_name, target_col in target_table.columns.items():
             if not current_table.has_column(col_name):
                 changes.append(SchemaChange(
                     kind=ChangeKind.ADD_COLUMN,
                     table=table_name,
+                    schema=target_table.schema,
                     column=col_name,
                     new_state=target_col,
                     description=f"Add column '{col_name}' to '{table_name}'",
@@ -255,6 +271,7 @@ def diff_states(current: SchemaState, target: SchemaState) -> List[SchemaChange]
                     changes.append(SchemaChange(
                         kind=ChangeKind.ALTER_COLUMN,
                         table=table_name,
+                        schema=target_table.schema,
                         column=col_name,
                         old_state=current_col,
                         new_state=target_col,
@@ -284,7 +301,8 @@ def project_state_from_models(models: list) -> SchemaState:
         if not hasattr(model, "_meta"):
             continue
 
-        table = TableState(name=model._meta.table_name)
+        schema = getattr(model._meta, "schema", "")
+        table = TableState(name=model._meta.table_name, schema=schema)
         for field_name, f in model._meta.fields.items():
             col = ColumnState(
                 name = f.column,

@@ -9,12 +9,12 @@ import { Badge } from '@site/src/components/Badge';
 # Ryx ORM
 
 <div style={{ fontSize: '1.15rem', color: 'var(--ryx-text-secondary)', lineHeight: 1.7, marginBottom: '2rem' }}>
-  <strong>Django-style Python ORM. Powered by Rust.</strong><br/>
-  Ergonomic query API. Async-native. Zero GIL blocking. Compiled performance.
+  <strong>Django-style ORM for Python and Rust. Powered by a shared Rust SQL engine.</strong><br/>
+  Async-native Python API, Rust-native API, compiled query planning, and sqlx-backed execution.
 </div>
 
 <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '2.5rem', flexWrap: 'wrap' }}>
-  <Badge variant="success">v0.1.0</Badge>
+  <Badge variant="success">v0.1.x</Badge>
   <Badge variant="default">Python 3.10+</Badge>
   <Badge variant="info">PostgreSQL</Badge>
   <Badge variant="info">MySQL</Badge>
@@ -23,7 +23,7 @@ import { Badge } from '@site/src/components/Badge';
 
 ```python
 import ryx
-from ryx import Model, CharField, IntField, Q, Count, Sum
+from ryx import Model, BooleanField, CharField, IntField, Q
 
 class Post(Model):
     title  = CharField(max_length=200)
@@ -46,8 +46,8 @@ posts = await (
 | | Django ORM | SQLAlchemy | **Ryx** |
 |---|---|---|---|
 | **API** | Ergonomic | Verbose | **Ergonomic** |
-| **Runtime** | Sync Python | Async Python | **Async Rust** |
-| **GIL blocking** | Yes | Yes | **Zero** |
+| **Runtime** | Sync Python | Async Python | **Async Python + Rust execution** |
+| **Query engine** | Python | Python | **Rust compiler + sqlx backend** |
 | **Backends** | All | All | **PG · MySQL · SQLite** |
 | **Migrations** | Built-in | Alembic | **Built-in** |
 
@@ -57,7 +57,7 @@ posts = await (
   <FeatureCard
     icon="⚡"
     title="Rust Performance"
-    description="Queries compiled and executed in Rust. Zero Python event-loop blocking."
+    description="Queries are compiled through a shared Rust query engine and executed via sqlx."
     href="/internals/architecture"
   />
   <FeatureCard
@@ -69,7 +69,7 @@ posts = await (
   <FeatureCard
     icon="🔗"
     title="Relationships"
-    description="ForeignKey, OneToOne, ManyToMany with select_related and prefetch_related."
+    description="ForeignKey, OneToOne, ManyToMany descriptors, reverse managers, and explicit joins."
     href="/relationships/foreign-key"
   />
   <FeatureCard
@@ -92,7 +92,7 @@ posts = await (
   />
   <FeatureCard
     icon="🔍"
-    title="30+ Field Types"
+    title="Comprehensive Fields"
     description="From AutoField to JSONField, with built-in validation."
     href="/core-concepts/fields"
   />
@@ -113,20 +113,20 @@ posts = await (
 ## Quick Start
 
 ```bash
-pip install maturin
-maturin develop          # compile Rust + install
+pip install ryx
 ```
 
 ```python
 import asyncio, ryx
 from ryx import Model, CharField
+from ryx.migrations import MigrationRunner
 
 class Article(Model):
     title = CharField(max_length=200)
 
 async def main():
     await ryx.setup("sqlite:///app.db")
-    await ryx.migrate([Article])
+    await MigrationRunner([Article]).migrate()
     await Article.objects.create(title="Hello Ryx")
     print(await Article.objects.all())
 

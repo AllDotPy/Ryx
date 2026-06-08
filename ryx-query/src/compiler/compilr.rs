@@ -197,6 +197,7 @@ pub fn compile(node: &QueryNode) -> QueryResult<CompiledQuery> {
 fn compute_plan_hash(node: &QueryNode) -> PlanHash {
     let mut h = DefaultHasher::new();
     node.table.hash(&mut h);
+    node.schema.hash(&mut h);
     node.backend.hash(&mut h);
     node.distinct.hash(&mut h);
     node.limit.hash(&mut h);
@@ -335,11 +336,11 @@ fn compile_select(
     }
 
     writer.write(" FROM ");
-    writer.write_symbol(node.table);
+    write_table_ref(node, writer);
 
     if !node.joins.is_empty() {
         writer.write(" ");
-        compile_joins(&node.joins, writer);
+        compile_joins(node, writer);
     }
 
     compile_where_combined(
@@ -390,12 +391,11 @@ fn compile_aggregate(
     writer.write("SELECT ");
     compile_agg_cols(&node.annotations, writer);
     writer.write(" FROM ");
-    let table_resolved = GLOBAL_INTERNER.resolve(node.table);
-    writer.write_quote(&table_resolved);
+    write_table_ref(node, writer);
 
     if !node.joins.is_empty() {
         writer.write(" ");
-        compile_joins(&node.joins, writer);
+        compile_joins(node, writer);
     }
 
     compile_where_combined(
@@ -415,11 +415,10 @@ fn compile_count(
     writer: &mut SqlWriter,
 ) -> QueryResult<()> {
     writer.write("SELECT COUNT(*) FROM ");
-    let table_resolved = GLOBAL_INTERNER.resolve(node.table);
-    writer.write_quote(&table_resolved);
+    write_table_ref(node, writer);
     if !node.joins.is_empty() {
         writer.write(" ");
-        compile_joins(&node.joins, writer);
+        compile_joins(node, writer);
     }
     compile_where_combined(
         &node.filters,
@@ -437,8 +436,7 @@ fn compile_delete(
     writer: &mut SqlWriter,
 ) -> QueryResult<()> {
     writer.write("DELETE FROM ");
-    let table_resolved = GLOBAL_INTERNER.resolve(node.table);
-    writer.write_quote(&table_resolved);
+    write_table_ref(node, writer);
     compile_where_combined(
         &node.filters,
         node.q_filter.as_ref(),
@@ -459,8 +457,7 @@ fn compile_update(
         return Err(QueryError::Internal("UPDATE with no assignments".into()));
     }
     writer.write("UPDATE ");
-    let table_resolved = GLOBAL_INTERNER.resolve(node.table);
-    writer.write_quote(&table_resolved);
+    write_table_ref(node, writer);
     writer.write(" SET ");
 
     let mut cols_out: Vec<String> = Vec::with_capacity(assignments.len());
@@ -498,8 +495,7 @@ fn compile_insert(
     values.extend(vals);
 
     writer.write("INSERT INTO ");
-    let table_resolved = GLOBAL_INTERNER.resolve(node.table);
-    writer.write_quote(&table_resolved);
+    write_table_ref(node, writer);
     writer.write(" (");
     writer.write_comma_separated(&cols, |c, w| w.write_symbol(*c));
     writer.write(") VALUES (");
@@ -517,8 +513,43 @@ fn compile_insert(
     Ok(cols_resolved)
 }
 
-pub fn compile_joins(joins: &[JoinClause], writer: &mut SqlWriter) {
-    for (i, j) in joins.iter().enumerate() {
+/// Write a schema-qualified table reference.
+///
+/// If ``node.schema`` is set and the backend supports schemas,
+/// writes ``"schema"."table"``. Otherwise writes just ``"table"``.
+fn write_table_ref(node: &QueryNode, writer: &mut SqlWriter) {
+    let table = GLOBAL_INTERNER.resolve(node.table);
+    match node.schema {
+        Some(sym) if node.backend.supports_schemas() => {
+            let schema = GLOBAL_INTERNER.resolve(sym);
+            writer.write_quote(&schema);
+            writer.write(".");
+            writer.write_quote(&table);
+        }
+        _ => {
+            writer.write_quote(&table);
+        }
+    }
+}
+
+/// Write a schema-qualified join table reference.
+fn write_join_table_ref(table: Symbol, schema: Option<Symbol>, backend: Backend, writer: &mut SqlWriter) {
+    let table_str = GLOBAL_INTERNER.resolve(table);
+    match schema {
+        Some(sym) if backend.supports_schemas() => {
+            let schema_str = GLOBAL_INTERNER.resolve(sym);
+            writer.write_quote(&schema_str);
+            writer.write(".");
+            writer.write_quote(&table_str);
+        }
+        _ => {
+            writer.write_quote(&table_str);
+        }
+    }
+}
+
+pub fn compile_joins(node: &QueryNode, writer: &mut SqlWriter) {
+    for (i, j) in node.joins.iter().enumerate() {
         if i > 0 {
             writer.write(" ");
         }
@@ -531,7 +562,7 @@ pub fn compile_joins(joins: &[JoinClause], writer: &mut SqlWriter) {
         };
         writer.write(kind);
         writer.write(" ");
-        writer.write_symbol(j.table);
+        write_join_table_ref(j.table, node.schema, node.backend, writer);
         if let Some(alias) = &j.alias {
             writer.write(" AS ");
             writer.write_symbol(*alias);
@@ -1032,5 +1063,130 @@ mod tests {
 
     fn init_registry() {
         crate::lookups::init_registry();
+    }
+
+    // ── Schema-qualified query tests ─────────────────────
+
+    fn schema_node() -> QueryNode {
+        init_registry();
+        QueryNode::select("posts").with_schema("tenant1")
+    }
+
+    #[test]
+    fn test_select_with_schema() {
+        let q = compile(&schema_node()).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "SELECT FROM should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_select_no_schema() {
+        init_registry();
+        let q = compile(&QueryNode::select("posts")).unwrap();
+        assert!(!q.sql.contains('.'), "No schema should not qualify: {}", q.sql);
+        assert!(q.sql.contains(r#""posts""#));
+    }
+
+    #[test]
+    fn test_count_with_schema() {
+        let mut node = schema_node();
+        node.operation = QueryOperation::Count;
+        let q = compile(&node).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "COUNT FROM should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_delete_with_schema() {
+        let mut node = schema_node();
+        node.operation = QueryOperation::Delete;
+        let q = compile(&node).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "DELETE FROM should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_update_with_schema() {
+        let mut node = schema_node();
+        node.operation = QueryOperation::Update {
+            assignments: vec![("title".into(), SqlValue::Text("hello".into()))],
+        };
+        let q = compile(&node).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "UPDATE should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_insert_with_schema() {
+        let mut node = schema_node();
+        node.operation = QueryOperation::Insert {
+            values: vec![("title".into(), SqlValue::Text("hello".into()))],
+            returning_id: true,
+        };
+        let q = compile(&node).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "INSERT INTO should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_join_with_schema() {
+        let node = schema_node().with_join(JoinClause {
+            kind: JoinKind::Inner,
+            table: "authors".into(),
+            alias: Some("a".into()),
+            on_left: "posts.author_id".into(),
+            on_right: "a.id".into(),
+        });
+        let q = compile(&node).unwrap();
+        assert!(q.sql.contains(r#""tenant1"."posts""#),
+            "Main table should be schema-qualified: {}", q.sql);
+        assert!(q.sql.contains(r#""tenant1"."authors""#),
+            "Join table should be schema-qualified: {}", q.sql);
+    }
+
+    #[test]
+    fn test_schema_does_not_affect_mysql() {
+        init_registry();
+        let node = QueryNode::select("posts")
+            .with_schema("tenant1")
+            .with_backend(Backend::MySQL);
+        let q = compile(&node).unwrap();
+        assert!(!q.sql.contains("tenant1"),
+            "MySQL should not schema-qualify: {}", q.sql);
+    }
+
+    #[test]
+    fn test_schema_does_not_affect_sqlite() {
+        init_registry();
+        let node = QueryNode::select("posts")
+            .with_schema("tenant1")
+            .with_backend(Backend::SQLite);
+        let q = compile(&node).unwrap();
+        assert!(!q.sql.contains("tenant1"),
+            "SQLite should not schema-qualify: {}", q.sql);
+    }
+
+    #[test]
+    fn test_schema_in_plan_hash() {
+        init_registry();
+        // Same query, different schemas should produce different plan hashes
+        use std::hash::{Hash, Hasher, DefaultHasher};
+
+        fn plan_hash_for(node: &QueryNode) -> u64 {
+            let mut h = DefaultHasher::new();
+            node.table.hash(&mut h);
+            node.schema.hash(&mut h);
+            node.backend.hash(&mut h);
+            h.finish()
+        }
+
+        let n1 = QueryNode::select("posts").with_schema("tenant1");
+        let n2 = QueryNode::select("posts").with_schema("tenant2");
+        let n3 = QueryNode::select("posts"); // no schema
+
+        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n2),
+            "Different schemas must produce different plan hashes");
+        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n3),
+            "Schema vs no-schema must produce different plan hashes");
     }
 }

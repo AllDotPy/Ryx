@@ -257,6 +257,29 @@ fn find_table_name(attrs: &[Attribute]) -> String {
     String::new()
 }
 
+fn find_database_name(attrs: &[Attribute]) -> Option<String> {
+    for attr in attrs {
+        if attr.path().is_ident("database") {
+            match &attr.meta {
+                Meta::List(list) => {
+                    if let Ok(lit) = syn::parse2::<syn::LitStr>(list.tokens.clone()) {
+                        return Some(lit.value());
+                    }
+                }
+                Meta::NameValue(MetaNameValue {
+                    value:
+                        syn::Expr::Lit(syn::ExprLit {
+                            lit: Lit::Str(s), ..
+                        }),
+                    ..
+                }) => return Some(s.value()),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 fn field_column_name(field: &syn::Field) -> String {
     parse_field_attr(field)
         .column
@@ -409,7 +432,7 @@ fn pk_field_name(fields: &Fields) -> String {
     "id".to_string()
 }
 
-#[proc_macro_derive(Model, attributes(table, field, relation))]
+#[proc_macro_derive(Model, attributes(table, field, relation, database))]
 pub fn derive_model(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     let name = &input.ident;
@@ -431,6 +454,8 @@ pub fn derive_model(input: TokenStream) -> TokenStream {
     } else {
         table_name
     };
+    let database_name = find_database_name(&input.attrs)
+        .unwrap_or_else(|| "default".to_string());
 
     let fields = match &input.data {
         Data::Struct(data) => &data.fields,
@@ -498,6 +523,10 @@ pub fn derive_model(input: TokenStream) -> TokenStream {
 
             fn field_meta() -> &'static [::ryx_rs::model::FieldMeta] {
                 &[#(#field_meta_entries),*]
+            }
+
+            fn database() -> &'static str {
+                #database_name
             }
         }
 
@@ -677,10 +706,12 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         table_name
     };
+    let database_name = find_database_name(&strukt.attrs)
+        .unwrap_or_else(|| "default".to_string());
 
-    // Strip #[table], #[field], #[relation] helper attrs
+    // Strip #[table], #[field], #[relation], #[database] helper attrs
     strukt.attrs.retain(|a| {
-        !a.path().is_ident("table") && !a.path().is_ident("field") && !a.path().is_ident("relation")
+        !a.path().is_ident("table") && !a.path().is_ident("field") && !a.path().is_ident("relation") && !a.path().is_ident("database")
     });
     // Also strip #[field] from each field
     if let syn::Fields::Named(ref mut named) = strukt.fields {
@@ -881,6 +912,10 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             fn field_meta() -> &'static [::ryx_rs::model::FieldMeta] {
                 &[#(#field_meta_entries),*]
+            }
+
+            fn database() -> &'static str {
+                #database_name
             }
         }
 
