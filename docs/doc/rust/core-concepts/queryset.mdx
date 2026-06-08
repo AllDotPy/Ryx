@@ -4,7 +4,21 @@ sidebar_position: 5
 
 # QuerySet
 
-`QuerySet<T>` is the lazy, chainable query builder. Every model's `objects()` manager returns one.
+`QuerySet<T>` is the lazy, chainable query builder. The canonical entry point is
+`ObjectsManager::<T>::new()`.
+
+Some examples use a short `Post::objects()` helper. That helper is not required
+by the macro; define it yourself if you want the shorter style:
+
+```rust
+use ryx_rs::ObjectsManager;
+
+impl Post {
+    fn objects() -> ObjectsManager<Self> {
+        ObjectsManager::new()
+    }
+}
+```
 
 ## Entry Points
 
