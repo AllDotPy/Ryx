@@ -10,6 +10,7 @@ Let's go from zero to a working query in 5 minutes.
 
 ```rust
 use ryx_rs::model;
+use ryx_rs::ObjectsManager;
 
 #[model]
 #[table("posts")]
@@ -59,7 +60,7 @@ See [Migrations](../core-concepts/migrations) for the full guide.
 ## 3. Create Records
 
 ```rust
-let post = Post::objects().create()
+let post = ObjectsManager::<Post>::new().create()
     .set("title", "Hello Ryx")
     .set("slug", "hello-ryx")
     .set("views", 42i64)
@@ -71,24 +72,24 @@ let post = Post::objects().create()
 
 ```rust
 // All active posts, newest first
-let posts: Vec<Post> = Post::objects()
+let posts: Vec<Post> = ObjectsManager::<Post>::new()
     .filter("active", true)
     .order_by("-views")
     .all().await?;
 
 // First match
-let first: Option<Post> = Post::objects()
+let first: Option<Post> = ObjectsManager::<Post>::new()
     .filter("active", true)
     .order_by("title")
     .first().await?;
 
 // Count
-let count = Post::objects()
+let count = ObjectsManager::<Post>::new()
     .filter("active", true)
     .count().await?;
 
 // Check existence
-let exists = Post::objects()
+let exists = ObjectsManager::<Post>::new()
     .filter("title__startswith", "Draft")
     .exists().await?;
 ```
@@ -97,13 +98,13 @@ let exists = Post::objects()
 
 ```rust
 // Bulk update
-Post::objects()
+ObjectsManager::<Post>::new()
     .filter("active", false)
     .update(vec![("active", true)])
     .await?;
 
 // Bulk delete
-Post::objects()
+ObjectsManager::<Post>::new()
     .filter("views", 0i64)
     .delete().await?;
 ```
@@ -113,6 +114,7 @@ Post::objects()
 ```rust
 use ryx_rs::model;
 use ryx_rs::migration::MigrationRunner;
+use ryx_rs::ObjectsManager;
 
 #[model]
 #[table("posts")]
@@ -130,20 +132,21 @@ async fn main() -> ryx_rs::RyxResult<()> {
     ryx_rs::init().await?;
     MigrationRunner::new().live(true).model::<Post>().run().await?;
 
-    Post::objects().create()
+    ObjectsManager::<Post>::new().create()
         .set("title", "Hello Ryx")
         .set("slug", "hello-ryx")
         .set("views", 100i64)
         .save().await?;
 
-    let posts: Vec<Post> = Post::objects()
+    let posts: Vec<Post> = ObjectsManager::<Post>::new()
         .filter("active", true)
         .order_by("-views")
         .all().await?;
 
     println!("Found {} posts", posts.len());
 
-    let stats = Post::objects()
+    let stats = ObjectsManager::<Post>::new()
+        .all()
         .aggregate(&[
             ryx_rs::agg::count("total", "id"),
             ryx_rs::agg::avg("avg", "views"),
