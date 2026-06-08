@@ -4,136 +4,283 @@ sidebar_position: 10
 
 # CLI
 
-Ryx includes a command-line interface for common database tasks.
+Ryx ships a management CLI for migrations, introspection, shell access, native
+database shells, destructive flushes, and version checks.
 
 ```bash
-python -m ryx <command> [options]
+python -m ryx [global-options] <command> [command-options]
+ryx [global-options] <command> [command-options]
 ```
 
-Commands use ANSI colors when the terminal supports it. Set `NO_COLOR=1` to disable, or pipe output to auto-disable.
+Global options:
 
-## Commands
+| Flag | Purpose |
+|---|---|
+| `--url`, `-u` | Database URL. Overrides environment/config values |
+| `--settings`, `-s` | Settings module name. Defaults to `ryx_settings` |
+| `--verbose`, `-v` | Enable verbose output |
+| `--debug` | Enable debug mode |
 
-### migrate
+The command registry is plugin-aware, so additional commands can be registered
+by Ryx CLI plugins.
 
-Apply migrations to the database:
+## Configuration Resolution
+
+The CLI resolves configuration from:
+
+1. Global CLI flags
+2. Environment variables
+3. A settings module
+4. Config files in the current working directory
+
+Supported config file names:
+
+```text
+ryx.yaml
+ryx.yml
+ryx.toml
+ryx.json
+```
+
+Environment variables:
 
 ```bash
-python -m ryx migrate \
-    --url postgres://user:pass@localhost/mydb \
-    --models myapp.models
+export RYX_DATABASE_URL="postgres://user:pass@localhost/app"
+export RYX_DB_REPLICA_URL="postgres://user:pass@localhost/app_replica"
+export RYX_DB_LOGS_URL="sqlite:///logs.db"
+```
+
+Example TOML:
+
+```toml
+[urls]
+default = "postgres://user:pass@localhost/app"
+replica = "postgres://user:pass@localhost/app_replica"
+
+[pool]
+max_conn = 10
+min_conn = 1
+connect_timeout = 30
+idle_timeout = 600
+max_lifetime = 1800
+
+[models]
+files = ["myapp.models"]
+
+[migrations]
+dir = "migrations"
+```
+
+## `makemigrations`
+
+Detect model changes and generate migration files.
+
+```bash
+python -m ryx makemigrations --models myapp.models
+python -m ryx makemigrations --models myapp.models --name add_posts
+python -m ryx makemigrations --models myapp.models --check
 ```
 
 Options:
 
-| Flag | Description |
-|------|-------------|
-| `--url` | Database URL (or use `RYX_DATABASE_URL`) |
-| `--models` | Python dotted path to your models module |
-| `--dir` | Migrations directory (default: `migrations`) |
-| `--plan` | Show SQL without applying |
-| `--alias` | Only apply to a specific database alias |
-| `--no-interactive` | Skip interactive prompts (for CI/CD) |
+| Flag | Purpose |
+|---|---|
+| `--models MODULE` | Dotted module path containing models; can also come from config |
+| `--dir DIR` | Migrations directory. Defaults to `migrations` |
+| `--alias ALIAS` | Generate migrations in an alias-specific subdirectory |
+| `--name NAME` | Override the generated migration name slug |
+| `--check` | Exit with status `1` if changes are detected |
+| `--squash` | Reserved flag for squashing multiple migrations |
 
-### makemigrations
+Use `--check` in CI to fail when models and migration files drift.
 
-Generate migration files:
+## `migrate`
 
-```bash
-python -m ryx makemigrations \
-    --models myapp.models \
-    --dir migrations/
-
-# Check mode — exit 1 if unapplied changes
-python -m ryx makemigrations --models myapp.models --check
-```
-
-### showmigrations
-
-Show migration status:
+Apply pending migrations.
 
 ```bash
-python -m ryx showmigrations \
-    --url postgres://user:pass@localhost/mydb \
-    --dir migrations/
+python -m ryx --url postgres://user:pass@localhost/app migrate --models myapp.models
+python -m ryx migrate --models myapp.models --dry-run
+python -m ryx migrate --models myapp.models --database replica
+python -m ryx migrate --models myapp.models --schema tenant_1
 ```
 
-### sqlmigrate
+Options:
 
-Print SQL for a specific migration:
+| Flag | Purpose |
+|---|---|
+| `--dry-run` | Print SQL without executing |
+| `--models MODULE` | Dotted module path containing models |
+| `--dir DIR` | Migrations directory. Defaults to `migrations` |
+| `--plan` | Show migration plan without executing |
+| `--database ALIAS` | Run migrations for one database alias |
+| `--no-interactive` | Fail if no migration files are found; useful in CI |
+| `--schema SCHEMA` | PostgreSQL schema for multi-schema migrations |
+
+`migrate` initializes Ryx with the resolved URL mapping before running the
+migration runner.
+
+## `showmigrations`
+
+List migration files and whether they are applied.
 
 ```bash
-python -m ryx sqlmigrate 0001_initial --dir migrations/
+python -m ryx showmigrations --dir migrations
+python -m ryx showmigrations --unapplied
 ```
 
-### flush
+Options:
 
-Delete all data from all tables:
+| Flag | Purpose |
+|---|---|
+| `--dir DIR` | Migrations directory |
+| `--unapplied` | Show only unapplied migrations |
+
+## `sqlmigrate`
+
+Print SQL for one migration without executing it.
 
 ```bash
-python -m ryx flush \
-    --models myapp.models \
-    --url postgres://user:pass@localhost/mydb \
-    --yes
+python -m ryx sqlmigrate 0001_initial --dir migrations
+python -m ryx sqlmigrate 0001_initial --backends postgres,mysql,sqlite
+python -m ryx sqlmigrate 0001_initial --schema tenant_1
 ```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `name` | Migration name, for example `0001_initial` |
+| `--dir DIR` | Migrations directory. Defaults to `migrations` |
+| `--backends LIST` | Comma-separated backend filter: `postgres,mysql,sqlite` |
+| `--schema SCHEMA` | PostgreSQL schema |
+
+## `flush`
+
+Delete all rows from all model tables.
+
+```bash
+python -m ryx --url sqlite:///app.db flush --models myapp.models
+python -m ryx --url sqlite:///app.db flush --models myapp.models --yes
+```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--models MODULE` | Required dotted module path containing models |
+| `--yes` | Skip the confirmation prompt |
+| `--force` | Alias for `--yes` |
 
 :::warning
-This deletes ALL data. Use `--yes` to skip the confirmation prompt.
+`flush` is destructive. It issues `DELETE FROM "<table>"` for every loaded
+managed model table. Use `--yes` or `--force` only in controlled environments.
 :::
 
-### shell
+## `shell`
 
-Interactive Python shell with ORM pre-loaded:
-
-```bash
-python -m ryx shell \
-    --url postgres://user:pass@localhost/mydb \
-    --models myapp.models
-```
-
-### dbshell
-
-Connect to the database with the native CLI client:
+Start an interactive Python shell.
 
 ```bash
-python -m ryx dbshell --url postgres://user:pass@localhost/mydb
-# Opens psql
+python -m ryx shell --models myapp.models
+python -m ryx shell --query "await Post.objects.count()"
+python -m ryx shell --notebook
 ```
 
-### inspectdb
+Options:
 
-Introspect an existing database and generate model stubs:
+| Flag | Purpose |
+|---|---|
+| `--models MODULE` | Pre-import models from a module |
+| `--query`, `-q` | Execute a query and print results |
+| `--ipyazthon` | Current registered flag for IPython mode |
+| `--notebook` | Launch Jupyter notebook instead of a shell |
+
+:::note
+The code currently registers the IPython flag as `--ipyazthon` while execution
+checks `ipython`. Until that implementation typo is fixed, prefer the plain
+shell or notebook mode.
+:::
+
+## `dbshell`
+
+Open the native database command-line client.
 
 ```bash
-# All tables
-python -m ryx inspectdb --url postgres://user:pass@localhost/mydb
-
-# Specific table
-python -m ryx inspectdb --url postgres://user:pass@localhost/mydb --table users
+python -m ryx --url postgres://user:pass@localhost/app dbshell
+python -m ryx --url mysql://user:pass@localhost/app dbshell
+python -m ryx --url sqlite:///app.db dbshell
+python -m ryx --url sqlite:///app.db dbshell -c ".tables"
 ```
 
-### version
+Ryx selects the native client from the URL scheme, such as `psql`, `mysql`, or
+`sqlite3`. The matching CLI tool must be installed on your system.
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--command`, `-c CMD` | Execute one native database command and exit |
+
+## `inspectdb`
+
+Introspect an existing database and print Ryx model stubs.
+
+```bash
+python -m ryx --url postgres://user:pass@localhost/app inspectdb
+python -m ryx --url postgres://user:pass@localhost/app inspectdb --table users
+python -m ryx --url postgres://user:pass@localhost/app inspectdb --schema tenant_1 -o models.py
+```
+
+Options:
+
+| Flag | Purpose |
+|---|---|
+| `--table TABLE` | Introspect one table |
+| `--output`, `-o FILE` | Write generated model stubs to a file |
+| `--schema SCHEMA` | Schema to inspect. Defaults to `public` |
+
+For PostgreSQL/MySQL, Ryx reads `information_schema`. For SQLite, it falls back
+to `sqlite_master`.
+
+## `version`
+
+Print the installed Ryx version.
 
 ```bash
 python -m ryx version
+python -m ryx version --verbose
 ```
 
-## Configuration
+Options:
 
-The CLI reads configuration from:
+| Flag | Purpose |
+|---|---|
+| `--verbose`, `-v` | Include Rust core version information when available |
 
-1. **CLI flags** — `--url`, `--models`, `--dir`, `--alias`, `--no-interactive`
-2. **Environment variable** — `RYX_DATABASE_URL`
-3. **Settings module** — `ryx_settings.py` in your project
+## Plugins
+
+CLI plugins can register extra commands. A plugin implements the `Plugin`
+interface and is loaded either from settings/config or Python entry points.
 
 ```python
-# ryx_settings.py
-DATABASE_URL = "postgres://user:pass@localhost/mydb"
-MODELS = ["myapp.models"]
-MIGRATIONS_DIR = "migrations/"
+from ryx.cli.plugins import Plugin
+
+class MyPlugin(Plugin):
+    name = "my-plugin"
+
+    def register_commands(self, registry):
+        registry["mycommand"] = MyCommand
 ```
 
-## Next Steps
+Use plugins when you need project-specific management commands without
+patching Ryx itself.
 
-→ **[Reference](/reference/api-reference)** — Complete API documentation
-→ **[Migrations](/core-concepts/migrations)** — Deep dive into migration internals
+## Operational Notes
+
+- Use `RYX_LOG_LEVEL=debug` for verbose query/runtime diagnostics.
+- Use `NO_COLOR=1` to disable ANSI colors.
+- Use `--no-interactive` and `makemigrations --check` in CI.
+- Prefer `--database` for `migrate`; `--alias` belongs to `makemigrations`.
+- Use config files for multi-database projects instead of repeating long URL
+  arguments in every command.
