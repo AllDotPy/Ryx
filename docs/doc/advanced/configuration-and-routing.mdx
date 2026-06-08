@@ -1,0 +1,186 @@
+---
+sidebar_position: 9
+---
+
+# Configuration and Routing
+
+Ryx supports explicit setup, import-time auto-initialization, multiple database
+aliases, per-model database metadata, and a global database router.
+
+## Explicit Setup
+
+```python
+import ryx
+
+await ryx.setup("sqlite:///app.db")
+```
+
+For multiple databases, pass a mapping:
+
+```python
+await ryx.setup({
+    "default": "postgres://user:pass@localhost/app",
+    "replica": "postgres://user:pass@localhost/app_replica",
+    "analytics": "sqlite:///analytics.db",
+})
+```
+
+Pool options:
+
+```python
+await ryx.setup(
+    {"default": "sqlite:///app.db"},
+    max_connections=10,
+    min_connections=1,
+    connect_timeout=30,
+    idle_timeout=600,
+    max_lifetime=1800,
+)
+```
+
+## Auto Initialization
+
+On import, Ryx attempts auto-initialization unless disabled:
+
+```bash
+export RYX_AUTO_INITIALIZE=0
+```
+
+Disabling values are `0`, `false`, `n`, and `no`.
+
+Auto-init reads database URLs from:
+
+```bash
+export RYX_DATABASE_URL="postgres://user:pass@localhost/app"
+export RYX_DB_REPLICA_URL="postgres://user:pass@localhost/app_replica"
+```
+
+`RYX_DATABASE_URL` becomes the `default` alias. `RYX_DB_<ALIAS>_URL` becomes the
+lowercase alias name.
+
+## Config Files
+
+Ryx looks for the first existing file in the current directory:
+
+```text
+ryx.yaml
+ryx.yml
+ryx.toml
+ryx.json
+```
+
+Example `ryx.toml`:
+
+```toml
+[urls]
+default = "postgres://user:pass@localhost/app"
+replica = "postgres://user:pass@localhost/app_replica"
+logs = "sqlite:///logs.db"
+
+[pool]
+max_conn = 10
+min_conn = 1
+connect_timeout = 30
+idle_timeout = 600
+max_lifetime = 1800
+
+[models]
+files = ["myapp.models", "billing.models"]
+
+[migrations]
+dir = "migrations"
+```
+
+The same structure can be represented as YAML or JSON.
+
+## Model-Level Database Alias
+
+Set `Meta.database` to bind a model to an alias by default:
+
+```python
+class AuditLog(Model):
+    event = CharField(max_length=200)
+
+    class Meta:
+        table_name = "audit_logs"
+        database = "logs"
+```
+
+Reads and writes fall back to `Meta.database` unless `.using()` or a router
+returns an alias first.
+
+## Query-Level Routing
+
+Use `.using(alias)` for one query:
+
+```python
+logs = await AuditLog.objects.using("logs").filter(event__icontains="login")
+posts = await Post.objects.using("replica").filter(active=True)
+```
+
+Use `.schema(schema)` for PostgreSQL multi-schema queries:
+
+```python
+tenant_posts = await Post.objects.schema("tenant_42").filter(active=True)
+```
+
+## Global Router
+
+```python
+from ryx.router import BaseRouter, set_router
+
+class ReadReplicaRouter(BaseRouter):
+    def db_for_read(self, model, **hints):
+        if getattr(model._meta, "database", None):
+            return model._meta.database
+        return "replica"
+
+    def db_for_write(self, model, **hints):
+        return getattr(model._meta, "database", None) or "default"
+
+    def allow_migrate(self, db, app_label, model_name):
+        return True
+
+set_router(ReadReplicaRouter())
+```
+
+Router methods return an alias string or `None`. Returning `None` tells Ryx to
+continue fallback resolution.
+
+## Resolution Order
+
+Read operations resolve aliases in this order:
+
+1. QuerySet `.using(alias)`
+2. `Router.db_for_read(model)`
+3. `Model.Meta.database`
+4. `"default"`
+
+Write operations resolve aliases in this order:
+
+1. Explicit `save(using=alias)` or QuerySet `.using(alias)` where supported
+2. `Router.db_for_write(model)`
+3. `Model.Meta.database`
+4. `"default"`
+
+## Introspection Helpers
+
+```python
+ryx.is_connected("default")
+ryx.list_aliases()
+ryx.pool_stats()
+```
+
+Use these helpers for startup diagnostics and health checks.
+
+## CLI Integration
+
+The CLI shares the same config discovery rules. For multi-database work:
+
+```bash
+python -m ryx migrate --models myapp.models --database default
+python -m ryx makemigrations --models myapp.models --alias logs
+```
+
+Use `--database` for applying migrations to one alias. Use `--alias` when
+generating alias-specific migration files.
