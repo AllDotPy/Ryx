@@ -4,78 +4,215 @@ sidebar_position: 3
 
 # Field Reference
 
-Complete reference of all field types, their SQL types, and Python types.
+Ryx fields are descriptors. A field stores model metadata, validates Python
+values, converts values to database values, and exposes SQL type information to
+the migration system.
+
+## Common Field Options
+
+All field classes inherit these options from `Field`:
+
+| Option | Default | Purpose |
+|---|---:|---|
+| `null` | `False` | Allows SQL `NULL` |
+| `blank` | `False` | Allows empty values during validation |
+| `default` | none | Static value or callable default |
+| `primary_key` | `False` | Marks the model primary key |
+| `unique` | `False` | Adds uniqueness validation/constraint metadata |
+| `db_index` | `False` | Marks the field for index creation |
+| `choices` | `None` | Restricts values with `ChoicesValidator` |
+| `validators` | `[]` | Extra validator instances |
+| `editable` | `True` | Excluded from `save()` when `False`, except auto timestamp fields |
+| `help_text` | `""` | Human-readable description |
+| `verbose_name` | `""` | Human-readable label |
+| `db_column` | field name | Overrides the SQL column name |
+| `unique_for_date` | `None` | Declares date-scoped uniqueness metadata |
+| `unique_for_month` | `None` | Declares month-scoped uniqueness metadata |
+| `unique_for_year` | `None` | Declares year-scoped uniqueness metadata |
+
+```python
+title = CharField(
+    max_length=200,
+    null=False,
+    blank=False,
+    default="Untitled",
+    unique=True,
+    db_index=True,
+    choices=["draft", "published"],
+    db_column="post_title",
+)
+```
+
+If no primary key is declared on a concrete model, Ryx injects:
+
+```python
+id = AutoField(primary_key=True, editable=False)
+```
 
 ## Integer Fields
 
-| Field | SQL Type | Python Type | Extra Kwargs |
+| Field | SQL Type | Python Type | Extra Options |
 |---|---|---|---|
-| `AutoField` | `SERIAL` | `int` | — |
-| `BigAutoField` | `BIGSERIAL` | `int` | — |
-| `SmallAutoField` | `SMALLSERIAL` | `int` | — |
+| `AutoField` | `SERIAL` | `int` | Usually primary key |
+| `BigAutoField` | `BIGSERIAL` | `int` | Large auto primary key |
+| `SmallAutoField` | `SMALLSERIAL` | `int` | Small auto primary key |
 | `IntField` | `INTEGER` | `int` | `min_value`, `max_value` |
 | `SmallIntField` | `SMALLINT` | `int` | `min_value`, `max_value` |
 | `BigIntField` | `BIGINT` | `int` | `min_value`, `max_value` |
-| `PositiveIntField` | `INTEGER` | `int` | implicit `min_value=0` |
+| `PositiveIntField` | `INTEGER` | `int` | Adds `min_value=0` behavior |
+
+```python
+class Product(Model):
+    stock = PositiveIntField(default=0)
+    rating = SmallIntField(min_value=1, max_value=5)
+```
+
+## Numeric Fields
+
+| Field | SQL Type | Python Type | Extra Options |
+|---|---|---|---|
+| `FloatField` | `DOUBLE PRECISION` | `float` | `min_value`, `max_value` |
+| `DecimalField` | `NUMERIC(max_digits, decimal_places)` | `Decimal` | `max_digits`, `decimal_places` |
+
+```python
+price = DecimalField(max_digits=10, decimal_places=2)
+score = FloatField(min_value=0.0, max_value=1.0)
+```
+
+## Boolean Fields
+
+| Field | SQL Type | Python Type | Notes |
+|---|---|---|---|
+| `BooleanField` | `BOOLEAN` | `bool` | Standard boolean |
+| `NullBooleanField` | `BOOLEAN` | `bool | None` | Sets `null=True` |
 
 ## Text Fields
 
-| Field | SQL Type | Python Type | Extra Kwargs |
+| Field | SQL Type | Python Type | Extra Options |
 |---|---|---|---|
-| `CharField` | `VARCHAR(n)` | `str` | `max_length`, `min_length`, `strip` |
+| `CharField` | `VARCHAR(max_length)` | `str` | `max_length`, `min_length`, `strip` |
 | `TextField` | `TEXT` | `str` | `min_length` |
-| `EmailField` | `VARCHAR(254)` | `str` | auto email validation |
-| `SlugField` | `VARCHAR(50)` | `str` | auto slug validation |
-| `URLField` | `VARCHAR(200)` | `str` | auto URL validation |
-| `IPAddressField` | `VARCHAR(15)` | `str` | auto IPv4 validation |
+| `SlugField` | `VARCHAR(50)` | `str` | Slug-style validation |
+| `EmailField` | `VARCHAR(254)` | `str` | Email validation |
+| `URLField` | `VARCHAR(200)` | `str` | URL validation |
+| `IPAddressField` | `VARCHAR(15)` | `str` | IPv4 validation |
 
-## Date & Time Fields
+```python
+slug = SlugField(unique=True)
+email = EmailField(unique=True)
+bio = TextField(blank=True)
+```
 
-| Field | SQL Type | Python Type | Extra Kwargs |
+## Date and Time Fields
+
+| Field | SQL Type | Python Type | Extra Options |
 |---|---|---|---|
 | `DateField` | `DATE` | `date` | `auto_now`, `auto_now_add` |
 | `DateTimeField` | `TIMESTAMP` | `datetime` | `auto_now`, `auto_now_add` |
 | `TimeField` | `TIME` | `time` | — |
-| `DurationField` | `BIGINT` | `timedelta` | stored as microseconds |
+| `DurationField` | `BIGINT` | `timedelta` | Stored as microseconds |
 
-## Special Fields
+```python
+created_at = DateTimeField(auto_now_add=True)
+updated_at = DateTimeField(auto_now=True)
+publish_date = DateField(null=True)
+```
 
-| Field | SQL Type | Python Type | Extra Kwargs |
+`auto_now_add` updates only on insert. `auto_now` updates on every save.
+
+## Structured and Binary Fields
+
+| Field | SQL Type | Python Type | Extra Options |
 |---|---|---|---|
-| `BooleanField` | `BOOLEAN` | `bool` | — |
-| `NullBooleanField` | `BOOLEAN` | `bool \| None` | implicit `null=True` |
-| `FloatField` | `DOUBLE PRECISION` | `float` | `min_value`, `max_value` |
-| `DecimalField` | `NUMERIC(p,s)` | `Decimal` | `max_digits`, `decimal_places` |
-| `UUIDField` | `UUID` | `UUID` | `auto_create` |
-| `JSONField` | `JSONB` | `dict \| list` | — |
+| `UUIDField` | `UUID` | `uuid.UUID` | `auto_create` |
+| `JSONField` | `JSONB` | `dict | list` | JSON lookups/transforms |
+| `ArrayField` | `<base>[]` | `list` | `base_field` |
 | `BinaryField` | `BYTEA` | `bytes` | — |
-| `ArrayField` | `T[]` | `list` | `base_field` |
+
+```python
+uid = UUIDField(auto_create=True, unique=True)
+metadata = JSONField(default=dict)
+tags = ArrayField(CharField(max_length=40), default=list)
+payload = BinaryField(null=True)
+```
+
+JSON lookups include `has_key`, `has_any`, `has_all`, `contains`, and
+`contained_by`. JSON transforms include `key`, `key_text`, and `json`.
 
 ## Relationship Fields
 
-| Field | SQL Type | Python Type | Extra Kwargs |
+| Field | Database Representation | Python Use | Extra Options |
 |---|---|---|---|
-| `ForeignKey` | `INTEGER` | `int` | `on_delete`, `related_name` |
-| `OneToOneField` | `INTEGER UNIQUE` | `int` | same as FK |
-| `ManyToManyField` | *(join table)* | — | `through` |
-
-## Common Field Options
+| `ForeignKey` | FK id column | Forward descriptor + reverse manager | `to`, `on_delete`, `related_name` |
+| `OneToOneField` | Unique FK id column | One-to-one descriptor | Same as `ForeignKey` |
+| `ManyToManyField` | Through table | Many-to-many manager | `to`, `through`, `related_name` |
 
 ```python
-CharField(
-    max_length=200,       # Required for CharField
-    min_length=5,         # Optional minimum
-    null=True,            # Allow NULL in DB
-    blank=True,           # Allow empty in validation
-    default="",           # Default value or callable
-    unique=True,          # UNIQUE constraint
-    db_index=True,        # CREATE INDEX
-    choices=["a", "b"],   # Restrict values
-    validators=[...],     # Extra validators
-    editable=True,        # Include in save()
-    help_text="...",      # Documentation
-    verbose_name="...",   # Human-readable label
-    db_column="col",      # Override column name
-    primary_key=False,    # Make this the PK
+class Author(Model):
+    name = CharField(max_length=100)
+
+class Post(Model):
+    author = ForeignKey(Author, on_delete="CASCADE", related_name="posts")
+
+class Profile(Model):
+    author = OneToOneField(Author, on_delete="CASCADE")
+```
+
+Supported `on_delete` values are interpreted by the field and migration layer.
+Use the exact values demonstrated in examples and tests, such as `"CASCADE"`.
+
+## Validation
+
+Field validation combines:
+
+1. `NotNullValidator` for non-null, non-primary-key fields
+2. `ChoicesValidator` when `choices` is provided
+3. `UniqueValueValidator` when `unique=True`
+4. Field-specific validators such as length, range, email, URL, or regex
+5. Explicit validators passed in `validators=[...]`
+
+```python
+from ryx import CharField, RegexValidator
+
+username = CharField(
+    max_length=40,
+    validators=[RegexValidator(r"^[a-z0-9_]+$")],
 )
 ```
+
+## Lookup Validation
+
+Each field class declares supported lookups and transforms. Ryx validates lookup
+chains before sending a query to Rust:
+
+```python
+await Post.objects.filter(title__icontains="ryx")
+await Post.objects.filter(created_at__year__gte=2025)
+await Post.objects.filter(metadata__key_text__icontains="error")
+```
+
+Unknown lookup suffixes fall back to exact matching during parsing, so prefer
+`ryx.available_lookups()` and this reference when authoring advanced filters.
+
+## Migration Metadata
+
+Fields expose `db_type()` and `deconstruct()` data used by:
+
+- `project_state_from_models()`
+- `Autodetector`
+- `DDLGenerator`
+- `MigrationRunner`
+
+For unmanaged legacy tables, set:
+
+```python
+class LegacyUser(Model):
+    name = CharField(max_length=100)
+
+    class Meta:
+        table_name = "legacy_users"
+        managed = False
+```
+
+`managed=False` keeps the model queryable while preventing migration generation
+from creating or altering its table.
