@@ -15,6 +15,9 @@ pub enum QueryError {
         got: String,
     },
 
+    #[error("Feature '{feature}' is not supported on backend '{backend}'")]
+    UnsupportedBackend { feature: String, backend: String },
+
     #[error("Internal query error: {0}")]
     Internal(String),
 }

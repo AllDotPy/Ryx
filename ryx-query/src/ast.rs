@@ -44,6 +44,8 @@ pub enum SqlValue {
     Decimal(String),
     /// Raw JSON text.
     Json(String),
+    /// pgvector embedding vector (PostgreSQL only). Bound as `[1,2,3]`.
+    Vector(Vec<f64>),
     /// Used by `__in` and `__range` lookups. The compiler expands it into
     /// multiple bind placeholders.
     List(smallvec::SmallVec<[Box<SqlValue>; 4]>),
@@ -63,8 +65,15 @@ impl SqlValue {
             SqlValue::Uuid(_) => "uuid",
             SqlValue::Decimal(_) => "decimal",
             SqlValue::Json(_) => "json",
+            SqlValue::Vector(_) => "vector",
             SqlValue::List(_) => "list",
         }
+    }
+
+    /// Render a vector value in pgvector's text format: `[1.0,2.0,3.0]`.
+    pub fn vector_to_text(v: &[f64]) -> String {
+        let parts: Vec<String> = v.iter().map(|f| f.to_string()).collect();
+        format!("[{}]", parts.join(","))
     }
 }
 
@@ -234,6 +243,43 @@ impl OrderByClause {
 }
 
 //
+// NearestNeighborClause — K-NN vector ordering (pgvector)
+//
+/// The pgvector distance metric used for ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DistanceOperator {
+    /// `<->` — Euclidean (L2) distance.
+    L2,
+    /// `<=>` — cosine distance.
+    Cosine,
+    /// `<#>` — negative inner (dot) product.
+    Inner,
+}
+
+impl DistanceOperator {
+    /// The SQL operator string used in `ORDER BY "col" <op> ?`.
+    pub fn sql(&self) -> &'static str {
+        match self {
+            Self::L2 => "<->",
+            Self::Cosine => "<=>",
+            Self::Inner => "<#>",
+        }
+    }
+}
+
+/// A K-nearest-neighbor clause: `ORDER BY "field" <op> ?`.
+///
+/// When `limit` is `Some(k)` the compiled query forces `LIMIT k`
+/// (the K in K-NN).
+#[derive(Debug, Clone)]
+pub struct NearestNeighborClause {
+    pub field: Symbol,
+    pub value: SqlValue,
+    pub operator: DistanceOperator,
+    pub limit: Option<u64>,
+}
+
+//
 // QueryOperation
 //
 #[derive(Debug, Clone)]
@@ -298,6 +344,9 @@ pub struct QueryNode {
 
     // #  Ordering / paging
     pub order_by: Vec<OrderByClause>,
+    /// Optional K-NN vector ordering (pgvector). When set, compiles to
+    /// `ORDER BY "field" <op> ?` before the regular `order_by`.
+    pub nearest_neighbor: Option<NearestNeighborClause>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub distinct: bool,
@@ -323,6 +372,7 @@ impl QueryNode {
             group_by: Vec::new(),
             having: Vec::new(),
             order_by: Vec::new(),
+            nearest_neighbor: None,
             limit: None,
             offset: None,
             distinct: false,
@@ -386,6 +436,12 @@ impl QueryNode {
     #[must_use]
     pub fn with_order_by(mut self, c: OrderByClause) -> Self {
         self.order_by.push(c);
+        self
+    }
+
+    #[must_use]
+    pub fn with_nearest_neighbor(mut self, nn: NearestNeighborClause) -> Self {
+        self.nearest_neighbor = Some(nn);
         self
     }
 
