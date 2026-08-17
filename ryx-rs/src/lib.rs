@@ -67,6 +67,10 @@ pub use ryx_common::RyxError;
 pub use ryx_common::RyxResult;
 pub use ryx_common::SqlValue;
 
+// Re-export pgvector K-NN types
+pub use ryx_query::ast::DistanceOperator;
+pub use ryx_query::ast::NearestNeighborClause;
+
 // Re-export the derive macros
 pub use ryx_macro::{FromRow, Model};
 

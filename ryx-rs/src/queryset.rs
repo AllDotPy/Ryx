@@ -5,7 +5,8 @@ use ryx_backend::backends::DecodedRow;
 use ryx_backend::pool;
 use ryx_common::{RyxResult, SqlValue};
 use ryx_query::ast::{
-    FilterNode, JoinClause, JoinKind, OrderByClause, QNode, QueryNode, QueryOperation,
+    DistanceOperator, FilterNode, JoinClause, JoinKind, NearestNeighborClause, OrderByClause, QNode,
+    QueryNode, QueryOperation,
 };
 use ryx_query::compiler;
 use ryx_query::symbols::Symbol;
@@ -147,6 +148,54 @@ impl<T: FromRow> QuerySet<T> {
         for f in fields {
             self.node = self.node.with_order_by(OrderByClause::parse(f));
         }
+        self
+    }
+
+    // === NEAREST NEIGHBOR (pgvector, PostgreSQL) ===
+
+    /// Order rows by distance to `vector` (K-NN). Combine with `.limit(k)`.
+    ///
+    /// ```ignore
+    /// Item::objects()
+    ///     .order_by_distance("embedding", vec![0.1, 0.2, 0.3], DistanceOperator::Cosine)
+    ///     .limit(10)
+    ///     .all().await?;
+    /// ```
+    pub fn order_by_distance(
+        mut self,
+        field: &str,
+        vector: Vec<f64>,
+        operator: DistanceOperator,
+    ) -> Self {
+        self.node = self.node.with_nearest_neighbor(NearestNeighborClause {
+            field: field.into(),
+            value: SqlValue::Vector(vector),
+            operator,
+            limit: None,
+        });
+        self
+    }
+
+    /// Return the `k` rows closest to `vector` (K-NN, pgvector).
+    ///
+    /// ```ignore
+    /// Item::objects()
+    ///     .nearest_neighbors("embedding", vec![0.1, 0.2, 0.3], 5, DistanceOperator::L2)
+    ///     .all().await?;
+    /// ```
+    pub fn nearest_neighbors(
+        mut self,
+        field: &str,
+        vector: Vec<f64>,
+        k: u64,
+        operator: DistanceOperator,
+    ) -> Self {
+        self.node = self.node.with_nearest_neighbor(NearestNeighborClause {
+            field: field.into(),
+            value: SqlValue::Vector(vector),
+            operator,
+            limit: Some(k),
+        });
         self
     }
 
