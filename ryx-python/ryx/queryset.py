@@ -498,6 +498,71 @@ class QuerySet:
     def distinct(self) -> "QuerySet":
         return self._with_op("distinct", True)
 
+    # Nearest-neighbor search (pgvector, PostgreSQL only)
+    _DISTANCE_OPERATORS = ("<->", "<=>", "<#>")
+
+    def _validate_distance_operator(self, operator: str) -> None:
+        if operator not in self._DISTANCE_OPERATORS:
+            raise ValueError(
+                f"Invalid distance operator '{operator}'. "
+                f"Choose one of: {', '.join(self._DISTANCE_OPERATORS)}"
+            )
+
+    def order_by_distance(
+        self,
+        field: str,
+        vector: Sequence[float],
+        operator: str = "<->",
+    ) -> "QuerySet":
+        """Order rows by distance to ``vector`` (K-NN, pgvector).
+
+        Combine with :meth:`limit` to perform a K-nearest-neighbor query.
+
+        Args:
+            field:    The ``VectorField`` column name.
+            vector:   The query embedding (list of floats).
+            operator: Distance metric — ``"<->"`` (L2), ``"<=>`` (cosine)
+                      or ``"<#>"`` (inner product). Default: ``"<->"``.
+
+        Example::
+
+            items = await Item.objects
+                .order_by_distance("embedding", [0.1, 0.2, 0.3], operator="<=>")
+                .limit(10)
+        """
+        self._validate_distance_operator(operator)
+        return self._with_op(
+            "order_by_distance", (field, list(vector), operator)
+        )
+
+    def nearest_neighbors(
+        self,
+        field: str,
+        vector: Sequence[float],
+        k: int = 10,
+        operator: str = "<->",
+    ) -> "QuerySet":
+        """Return the ``k`` rows closest to ``vector`` (K-NN, pgvector).
+
+        Args:
+            field:    The ``VectorField`` column name.
+            vector:   The query embedding (list of floats).
+            k:        Number of neighbors to return. Default: 10.
+            operator: Distance metric — ``"<->"`` (L2), ``"<=>"`` (cosine)
+                      or ``"<#>"`` (inner product). Default: ``"<->"``.
+
+        Example::
+
+            items = await Item.objects
+                .nearest_neighbors("embedding", [0.1, 0.2, 0.3], k=5)
+        """
+        if k < 1:
+            raise ValueError(f"k must be >= 1, got {k}")
+        self._validate_distance_operator(operator)
+        return self._with_op(
+            "nearest_neighbor", (field, list(vector), operator, int(k))
+        )
+
     def __getitem__(self, key):
         """Support slicing for pagination: qs[:3], qs[2:5], qs[3:7].
 

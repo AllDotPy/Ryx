@@ -54,6 +54,7 @@ from ryx.fields import (
     TimeField,
     URLField,
     UUIDField,
+    VectorField,
 )
 from ryx.queryset import (
     Avg,
@@ -251,6 +252,7 @@ __all__ = [
     "TimeField",
     "URLField",
     "UUIDField",
+    "VectorField",
     # QuerySet
     "QuerySet",
     "Q",

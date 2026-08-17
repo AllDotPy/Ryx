@@ -888,6 +888,50 @@ class ArrayField(Field):
 
 
 ####
+###     VECTOR FIELD  (pgvector — PostgreSQL only)
+#####
+class VectorField(Field):
+    """pgvector embedding vector (PostgreSQL only).
+
+    Stores an N-dimensional float vector, backed by the ``vector(n)``
+    PostgreSQL type (requires the ``pgvector`` extension).
+
+    Args:
+        dimensions: Vector dimensionality (e.g. 768 for OpenAI embeddings).
+                    Default: 768.
+
+    Supported lookups: ``isnull``.
+
+    Nearest-neighbor search is performed with :meth:`QuerySet.nearest_neighbors`
+    or :meth:`QuerySet.order_by_distance`.
+    """
+
+    SUPPORTED_LOOKUPS = ["isnull"]
+
+    def __init__(self, dimensions: int = 768, **kw):
+        self.dimensions = dimensions
+        super().__init__(**kw)
+
+    def db_type(self) -> str:
+        return f"vector({self.dimensions})"
+
+    def to_python(self, v):
+        if v is None:
+            return None
+        if isinstance(v, (list, tuple)):
+            return list(v)
+        if isinstance(v, str):
+            return json.loads(v)
+        return list(v)
+
+    def to_db(self, v):
+        return None if v is None else json.dumps(list(v))
+
+    def _build_implicit_validators(self):
+        pass
+
+
+####
 ###     FOREIGN KEY FIELD
 #####
 class ForeignKey(Field):

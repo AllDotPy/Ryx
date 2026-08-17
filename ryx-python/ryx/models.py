@@ -188,6 +188,12 @@ class Manager:
     def order_by(self, *f):
         return self.get_queryset().order_by(*f)
 
+    def nearest_neighbors(self, field, vector, k=10, operator="<->"):
+        return self.get_queryset().nearest_neighbors(field, vector, k=k, operator=operator)
+
+    def order_by_distance(self, field, vector, operator="<->"):
+        return self.get_queryset().order_by_distance(field, vector, operator=operator)
+
     def using(self, alias: str) -> "Manager":
         """Return a new Manager bound to the specified database alias."""
         new_mgr = Manager()
