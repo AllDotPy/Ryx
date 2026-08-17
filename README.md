@@ -101,6 +101,7 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 | **select_related** | ❌ | ✅ (Eager) | Rust API; Python currently uses explicit `.join()` |
 | **Migrations** | Diesel CLI | sea-orm-cli | **Built-in** |
 | **PostgreSQL schemas** | ❌ | ❌ | ✅ |
+| **Vector search (pgvector)** | ❌ | ❌ | ✅ |
 | **Backends** | PG · MySQL · SQLite | PG · MySQL · SQLite | **PG · MySQL · SQLite** |
 
 ## Architecture

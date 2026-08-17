@@ -1,0 +1,163 @@
+---
+sidebar_position: 13
+title: Vector Search (pgvector)
+description: Semantic search with embeddings using PostgreSQL pgvector.
+---
+
+Ryx supports **vector search** (K-nearest-neighbor) on PostgreSQL via the [pgvector](https://github.com/pgvector/pgvector) extension. Store embeddings in a `VectorField` and find the closest rows by distance.
+
+> Vector search is **PostgreSQL-only**. MySQL and SQLite raise a clear `NotImplementedError`.
+
+## Prerequisites
+
+Enable the pgvector extension on your database:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+## Defining a Vector Field
+
+Use `VectorField(dimensions=n)` where `n` is the embedding dimensionality (e.g. `768` for OpenAI `text-embedding-3-small`).
+
+### Python
+
+```python
+from ryx import Model, AutoField, CharField, VectorField
+
+class Item(Model):
+    id        = AutoField(primary_key=True)
+    title     = CharField(max_length=200)
+    embedding = VectorField(dimensions=768)
+```
+
+Migrations generate the correct `vector(768)` column type automatically:
+
+```bash
+python -m ryx migrate --models myapp.models
+```
+
+### Rust
+
+```rust
+use ryx_rs::model;
+
+#[model]
+#[table("items")]
+struct Item {
+    #[field(pk)] id: i64,
+    title: String,
+    embedding: Vec<f64>,   // vector column
+}
+```
+
+> In Rust the column type is controlled via `#[field(db_type = "vector(768)")]` if you need an explicit type.
+
+## Nearest-Neighbor Search (K-NN)
+
+### Python
+
+`.nearest_neighbors(field, vector, k=10, operator="<->")` returns the `k` closest rows, ordered by distance:
+
+```python
+query = await Item.objects.nearest_neighbors(
+    "embedding",
+    [0.1, 0.2, 0.3],   # the query embedding
+    k=5,
+    operator="<=>",    # cosine
+)
+for item in query:
+    print(item.title)
+```
+
+### Rust
+
+```rust
+let items: Vec<Item> = Item::objects()
+    .nearest_neighbors(
+        "embedding",
+        vec![0.1, 0.2, 0.3],
+        5,
+        ryx_rs::DistanceOperator::Cosine,
+    )
+    .all().await?;
+```
+
+## Order By Distance + Limit
+
+For explicit pagination, combine `.order_by_distance()` with `.limit()`:
+
+### Python
+
+```python
+items = await (
+    Item.objects
+        .order_by_distance("embedding", [0.1, 0.2, 0.3], operator="<->")
+        .limit(10)
+)
+```
+
+### Rust
+
+```rust
+let items: Vec<Item> = Item::objects()
+    .order_by_distance("embedding", vec![0.1, 0.2, 0.3], ryx_rs::DistanceOperator::L2)
+    .limit(10)
+    .all().await?;
+```
+
+## Distance Operators
+
+| Operator | Name | SQL | Use case |
+|---|---|---|---|
+| `"<->"` | Euclidean (L2) | `<->` | General-purpose distance |
+| `"<=>"` | Cosine | `<=>` | Semantic similarity (LLM embeddings) |
+| `"<#>"` | Inner product | `<#>` | Dot product (fast, no normalization) |
+
+## Inserting Vectors
+
+Assign a list of floats to the field and save:
+
+### Python
+
+```python
+item = await Item.objects.create(
+    title="Hello",
+    embedding=[0.1, 0.2, 0.3],
+)
+```
+
+### Rust
+
+```rust
+let _ = Item::objects()
+    .create()
+    .set("title", "Hello")
+    .set("embedding", SqlValue::Vector(vec![0.1, 0.2, 0.3]))
+    .execute().await?;
+```
+
+## Indexes (advanced)
+
+For large collections, add an HNSW or IVFFlat index on the vector column:
+
+```sql
+CREATE INDEX ON items USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX ON items USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
+```
+
+Run this via a raw SQL migration (`RunSQL`) or `ryx_core.raw_execute`.
+
+## Backend Support
+
+| Backend | VectorField | K-NN |
+|---|---|---|
+| PostgreSQL | ✅ `vector(n)` | ✅ |
+| MySQL | ❌ error | ❌ error |
+| SQLite | ❌ error | ❌ error |
+
+## Next Steps
+
+- **[Multi-Database Support](./multi-db)** — Route queries across connections
+- **[PostgreSQL Multi-Schema](./postgres-multi-schema)** — Schema-per-tenant isolation
+- **[CLI Reference](./cli)** — Management commands
