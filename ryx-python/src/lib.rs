@@ -3,7 +3,7 @@ pub mod plan;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::exceptions::{PyNotImplementedError, PyRuntimeError, PyValueError};
 use pyo3::prelude::IntoPyObject;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use pyo3::{IntoPyObjectExt, prelude::*};
@@ -33,6 +33,9 @@ impl<T> IntoPyResult<T> for Result<T, RyxError> {
                     QueryError::UnknownLookup { .. }
                     | QueryError::UnknownField { .. }
                     | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+                    QueryError::UnsupportedBackend { .. } => {
+                        PyNotImplementedError::new_err(qe.to_string())
+                    }
                     QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
                 },
                 RyxError::DatabaseWithSql(sql, e) => {
@@ -53,6 +56,9 @@ pub(crate) fn err_to_py(err: impl Into<RyxError>) -> PyErr {
             QueryError::UnknownLookup { .. }
             | QueryError::UnknownField { .. }
             | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+            QueryError::UnsupportedBackend { .. } => {
+                PyNotImplementedError::new_err(qe.to_string())
+            }
             QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
         },
         RyxError::DatabaseWithSql(sql, e) => {
@@ -686,6 +692,10 @@ fn sql_to_py<'py>(py: Python<'py>, v: &SqlValue) -> PyResult<Py<PyAny>> {
         SqlValue::Uuid(s) => s.into_pyobject(py)?.into_any().unbind(),
         SqlValue::Decimal(s) => s.into_pyobject(py)?.into_any().unbind(),
         SqlValue::Json(s) => s.into_pyobject(py)?.into_any().unbind(),
+        SqlValue::Vector(v) => {
+            let list = PyList::new(py, v)?;
+            list.into_any().unbind()
+        }
         SqlValue::List(items) => {
             let list = PyList::empty(py);
             for item in items {

@@ -4,8 +4,8 @@ use pyo3::types::{PyAny, PyList, PyTuple};
 
 use ryx_backend::pool as ryx_pool;
 use ryx_backend::query::{
-    AggFunc, AggregateExpr, FilterNode, JoinClause, JoinKind, OrderByClause, QueryNode,
-    QueryOperation, Symbol,
+    AggFunc, AggregateExpr, DistanceOperator, FilterNode, JoinClause, JoinKind, NearestNeighborClause,
+    OrderByClause, QueryNode, QueryOperation, SqlValue, Symbol,
 };
 
 use std::sync::Arc;
@@ -178,6 +178,34 @@ pub fn build_plan<'py>(
                 let schema: String = tuple.get_item(1)?.extract()?;
                 node = node.with_schema(schema);
             }
+            "nearest_neighbor" | "order_by_distance" => {
+                let payload = tuple.get_item(1)?;
+                let t = payload.cast::<PyTuple>()?;
+                let field: String = t.get_item(0)?.extract()?;
+                let vector = extract_vector(&t.get_item(1)?)?;
+                let operator: String = t.get_item(2)?.extract()?;
+                let dist_op = match operator.as_str() {
+                    "<->" => DistanceOperator::L2,
+                    "<=>" => DistanceOperator::Cosine,
+                    "<#>" => DistanceOperator::Inner,
+                    other => {
+                        return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                            "Invalid distance operator '{other}'. Choose from: <->, <=>, <#>"
+                        )))
+                    }
+                };
+                let limit = if tag == "nearest_neighbor" {
+                    Some(t.get_item(3)?.extract::<u64>()?)
+                } else {
+                    None
+                };
+                node = node.with_nearest_neighbor(NearestNeighborClause {
+                    field: field.into(),
+                    value: SqlValue::Vector(vector),
+                    operator: dist_op,
+                    limit,
+                });
+            }
             _ => {}
         }
     }
@@ -185,4 +213,32 @@ pub fn build_plan<'py>(
     Ok(crate::PyQueryBuilder {
         node: Arc::new(node),
     })
+}
+
+/// Extract a list of Python floats into a `Vec<f64>` for a pgvector value.
+///
+/// Accepts a Python ``list``/``tuple`` of ints/floats. Raises ``TypeError``
+/// for anything else (or non-numeric elements).
+fn extract_vector(obj: &Bound<'_, PyAny>) -> PyResult<Vec<f64>> {
+    if obj.is_none() {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "vector cannot be None",
+        ));
+    }
+    let list = obj
+        .cast::<PyList>()
+        .map_err(|_| pyo3::exceptions::PyTypeError::new_err("vector must be a list of floats"))?;
+    let mut out = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        let f: f64 = item.extract().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err("vector elements must be int or float")
+        })?;
+        out.push(f);
+    }
+    if out.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "vector must not be empty",
+        ));
+    }
+    Ok(out)
 }
