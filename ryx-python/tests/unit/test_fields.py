@@ -16,7 +16,7 @@ sys.modules["ryx.ryx_core"] = mock_core
 from ryx.fields import (
     Field, AutoField, BigAutoField, BigIntField, BooleanField, CharField,
     DateField, DateTimeField, DecimalField, EmailField, FloatField,
-    IntField, TextField, TimeField, URLField, UUIDField,
+    IntField, TextField, TimeField, URLField, UUIDField, VectorField,
 )
 from ryx.exceptions import ValidationError
 
@@ -303,3 +303,47 @@ class TestFieldValidation:
         # Should fail on empty string when blank=False
         with pytest.raises(ValidationError):
             field2.validate("")
+
+
+class TestVectorField:
+    """Test pgvector VectorField."""
+
+    def test_default_dimensions(self):
+        field = VectorField()
+        assert field.dimensions == 768
+
+    def test_custom_dimensions(self):
+        field = VectorField(dimensions=384)
+        assert field.dimensions == 384
+
+    def test_db_type(self):
+        assert VectorField().db_type() == "vector(768)"
+        assert VectorField(dimensions=384).db_type() == "vector(384)"
+
+    def test_to_python_list_passthrough(self):
+        field = VectorField()
+        assert field.to_python([0.1, 0.2]) == [0.1, 0.2]
+        assert field.to_python(None) is None
+
+    def test_to_python_from_json_string(self):
+        field = VectorField()
+        assert field.to_python("[0.1, 0.2]") == [0.1, 0.2]
+
+    def test_to_python_from_tuple(self):
+        field = VectorField()
+        assert field.to_python((0.1, 0.2)) == [0.1, 0.2]
+
+    def test_to_db(self):
+        field = VectorField()
+        assert field.to_db([0.1, 0.2]) == "[0.1, 0.2]"
+        assert field.to_db(None) is None
+
+    def test_supported_lookups_isnull_only(self):
+        field = VectorField()
+        assert field.SUPPORTED_LOOKUPS == ["isnull"]
+
+    def test_validate_lookup(self):
+        field = VectorField()
+        field._validate_lookup("isnull")
+        with pytest.raises(ValueError):
+            field._validate_lookup("contains")
