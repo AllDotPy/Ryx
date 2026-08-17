@@ -120,6 +120,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         group_by: vec![],
         having: vec![],
         order_by: vec![],
+        nearest_neighbor: None,
         limit: Some(100),
         offset: None,
         distinct: false,

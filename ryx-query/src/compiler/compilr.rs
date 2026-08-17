@@ -230,6 +230,14 @@ fn compute_plan_hash(node: &QueryNode) -> PlanHash {
         a.field.hash(&mut h);
         a.distinct.hash(&mut h);
     }
+    // Nearest-neighbor clause — hash structural fields (the vector value is
+    // bound as `?`, so it does not affect the SQL text and is excluded).
+    if let Some(nn) = &node.nearest_neighbor {
+        9u8.hash(&mut h);
+        nn.field.hash(&mut h);
+        nn.operator.hash(&mut h);
+        nn.limit.hash(&mut h);
+    }
     match &node.operation {
         QueryOperation::Select { columns } => {
             1u8.hash(&mut h);
@@ -361,12 +369,38 @@ fn compile_select(
         compile_filters(&node.having, values, node.backend, writer)?;
     }
 
-    if !node.order_by.is_empty() {
+    // K-NN (pgvector) ordering — emits ORDER BY "col" <op> ? before any
+    // secondary ORDER BY columns. PostgreSQL only; other backends error.
+    if let Some(nn) = &node.nearest_neighbor {
+        if node.backend != Backend::PostgreSQL {
+            return Err(QueryError::UnsupportedBackend {
+                feature: "nearest neighbor (pgvector)".into(),
+                backend: node.backend.as_str().into(),
+            });
+        }
+        writer.write(" ORDER BY ");
+        writer.write_qualified_symbol(nn.field);
+        writer.write(" ");
+        writer.write(nn.operator.sql());
+        writer.write(" ?");
+        values.push(nn.value.clone());
+        if !node.order_by.is_empty() {
+            writer.write(", ");
+            compile_order_by(&node.order_by, writer);
+        }
+    } else if !node.order_by.is_empty() {
         writer.write(" ORDER BY ");
         compile_order_by(&node.order_by, writer);
     }
 
-    if let Some(n) = node.limit {
+    // Effective LIMIT: an explicit K on the nearest-neighbor clause takes
+    // precedence; otherwise fall back to the query's own `.limit()`.
+    let effective_limit = node
+        .nearest_neighbor
+        .as_ref()
+        .and_then(|nn| nn.limit)
+        .or(node.limit);
+    if let Some(n) = effective_limit {
         writer.write(" LIMIT ");
         writer.write(&n.to_string());
     }
@@ -1188,5 +1222,121 @@ mod tests {
             "Different schemas must produce different plan hashes");
         assert_ne!(plan_hash_for(&n1), plan_hash_for(&n3),
             "Schema vs no-schema must produce different plan hashes");
+    }
+
+    // ── Nearest-neighbor (pgvector) tests ─────────────────
+
+    use crate::ast::NearestNeighborClause;
+
+    fn nn_node(operator: crate::ast::DistanceOperator, limit: Option<u64>) -> QueryNode {
+        init_registry();
+        QueryNode::select("items").with_nearest_neighbor(NearestNeighborClause {
+            field: "embedding".into(),
+            value: SqlValue::Vector(vec![1.0, 2.0, 3.0]),
+            operator,
+            limit,
+        })
+    }
+
+    #[test]
+    fn test_nearest_neighbor_l2() {
+        let q = compile(&nn_node(crate::ast::DistanceOperator::L2, Some(5))).unwrap();
+        assert_eq!(
+            q.sql,
+            r#"SELECT * FROM "items" ORDER BY "embedding" <-> ? LIMIT 5"#
+        );
+        assert!(matches!(q.values[0], SqlValue::Vector(_)));
+    }
+
+    #[test]
+    fn test_nearest_neighbor_cosine() {
+        let q = compile(&nn_node(crate::ast::DistanceOperator::Cosine, Some(10))).unwrap();
+        assert_eq!(
+            q.sql,
+            r#"SELECT * FROM "items" ORDER BY "embedding" <=> ? LIMIT 10"#
+        );
+    }
+
+    #[test]
+    fn test_nearest_neighbor_inner() {
+        let q = compile(&nn_node(crate::ast::DistanceOperator::Inner, Some(3))).unwrap();
+        assert_eq!(
+            q.sql,
+            r#"SELECT * FROM "items" ORDER BY "embedding" <#> ? LIMIT 3"#
+        );
+    }
+
+    #[test]
+    fn test_nearest_neighbor_without_limit() {
+        // order_by_distance() → no explicit K; rely on query LIMIT.
+        let mut node = nn_node(crate::ast::DistanceOperator::L2, None);
+        node = node.with_limit(20);
+        let q = compile(&node).unwrap();
+        assert_eq!(
+            q.sql,
+            r#"SELECT * FROM "items" ORDER BY "embedding" <-> ? LIMIT 20"#
+        );
+    }
+
+    #[test]
+    fn test_nearest_neighbor_no_limit_at_all() {
+        let q = compile(&nn_node(crate::ast::DistanceOperator::L2, None)).unwrap();
+        assert_eq!(q.sql, r#"SELECT * FROM "items" ORDER BY "embedding" <-> ?"#);
+    }
+
+    #[test]
+    fn test_nearest_neighbor_with_secondary_order() {
+        let mut node = nn_node(crate::ast::DistanceOperator::Cosine, Some(5));
+        node = node.with_order_by(crate::ast::OrderByClause::parse("-id"));
+        let q = compile(&node).unwrap();
+        assert_eq!(
+            q.sql,
+            r#"SELECT * FROM "items" ORDER BY "embedding" <=> ?, "id" DESC LIMIT 5"#
+        );
+    }
+
+    #[test]
+    fn test_nearest_neighbor_non_pg_errors() {
+        let node = nn_node(crate::ast::DistanceOperator::L2, Some(5))
+            .with_backend(Backend::SQLite);
+        let err = compile(&node).unwrap_err();
+        assert!(
+            matches!(err, QueryError::UnsupportedBackend { ref backend, .. } if backend == "sqlite"),
+            "expected UnsupportedBackend, got: {err}"
+        );
+
+        let node = nn_node(crate::ast::DistanceOperator::Cosine, Some(5))
+            .with_backend(Backend::MySQL);
+        let err = compile(&node).unwrap_err();
+        assert!(
+            matches!(err, QueryError::UnsupportedBackend { .. }),
+            "expected UnsupportedBackend, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_nearest_neighbor_in_plan_hash() {
+        init_registry();
+        use std::hash::{Hash, Hasher, DefaultHasher};
+
+        fn plan_hash_for(node: &QueryNode) -> u64 {
+            let mut h = DefaultHasher::new();
+            node.table.hash(&mut h);
+            node.nearest_neighbor.as_ref().map(|nn| {
+                nn.field.hash(&mut h);
+                nn.operator.hash(&mut h);
+                nn.limit.hash(&mut h);
+            });
+            h.finish()
+        }
+
+        let n1 = nn_node(crate::ast::DistanceOperator::L2, Some(5));
+        let n2 = nn_node(crate::ast::DistanceOperator::Cosine, Some(5));
+        let n3 = QueryNode::select("items"); // no K-NN
+
+        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n2),
+            "Different operators must produce different plan hashes");
+        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n3),
+            "K-NN vs no-K-NN must produce different plan hashes");
     }
 }
