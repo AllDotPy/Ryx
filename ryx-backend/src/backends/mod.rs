@@ -163,6 +163,9 @@ fn bind_pg<'q>(
         | SqlValue::Uuid(s)
         | SqlValue::Decimal(s)
         | SqlValue::Json(s) => q.bind(s.as_str()),
+        // pgvector: bind in its text format `[1,2,3]`. Only valid on PG,
+        // which is enforced at compile time (UnsupportedBackend).
+        SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
         SqlValue::List(_) => q,
     }
 }
@@ -183,6 +186,8 @@ fn bind_mysql<'q>(
         | SqlValue::Uuid(s)
         | SqlValue::Decimal(s)
         | SqlValue::Json(s) => q.bind(s.as_str()),
+        // Vectors are PG-only and blocked at compile time; bind as text defensively.
+        SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
         SqlValue::List(_) => q,
     }
 }
@@ -203,6 +208,8 @@ fn bind_sqlite<'q>(
         | SqlValue::Uuid(s)
         | SqlValue::Decimal(s)
         | SqlValue::Json(s) => q.bind(s.as_str()),
+        // Vectors are PG-only and blocked at compile time; bind as text defensively.
+        SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
         SqlValue::List(_) => q,
     }
 }

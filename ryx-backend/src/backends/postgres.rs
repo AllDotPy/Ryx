@@ -86,6 +86,8 @@ impl PostgresBackend {
                 | SqlValue::Uuid(s)
                 | SqlValue::Decimal(s)
                 | SqlValue::Json(s) => q.bind(s.as_str()),
+                // pgvector: bind in its text format `[1,2,3]`.
+                SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
                 // Lists should have been expanded by the compiler into individual
                 // placeholders. If we encounter a List here it's a compiler bug.
                 SqlValue::List(_) => {
@@ -145,6 +147,7 @@ impl PostgresBackend {
         query.values.get(idx).and_then(|v| match v {
             SqlValue::Date(_) => Some("::date"),
             SqlValue::DateTime(_) => Some("::timestamp"),
+            SqlValue::Vector(_) => Some("::vector"),
             SqlValue::Text(s) if is_date(s) => Some("::date"),
             SqlValue::Text(s) if is_timestamp(s) => Some("::timestamp"),
             _ => None,
@@ -172,6 +175,7 @@ impl PostgresBackend {
             "DateTimeField" | "DateTimeTzField" | "DateTimeTZField" => Some("::timestamp"),
             "TimeField" => Some("::time"),
             "JSONField" => Some("::jsonb"),
+            "VectorField" => Some("::vector"),
             "UUIDField" => Some("::uuid"),
             "AutoField" | "BigAutoField" | "SmallAutoField" => Some("::serial"),
             _ => None,

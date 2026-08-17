@@ -83,6 +83,8 @@ impl MySqlBackend {
                 | SqlValue::Uuid(s)
                 | SqlValue::Decimal(s)
                 | SqlValue::Json(s) => q.bind(s.as_str()),
+                // Vectors are PG-only and blocked at compile time; bind as text defensively.
+                SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
                 // Lists should have been expanded by the compiler into individual
                 // placeholders. If we encounter a List here it's a compiler bug.
                 SqlValue::List(_) => {
