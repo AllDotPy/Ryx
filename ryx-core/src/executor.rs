@@ -623,6 +623,8 @@ fn bind_values<'q>(
             | SqlValue::Uuid(s)
             | SqlValue::Decimal(s)
             | SqlValue::Json(s) => q.bind(s.as_str()),
+            // Vectors are PG-only and blocked at compile time; bind as text defensively.
+            SqlValue::Vector(v) => q.bind(SqlValue::vector_to_text(v)),
             // Lists should have been expanded by the compiler into individual
             // placeholders. If we encounter a List here it's a compiler bug.
             SqlValue::List(_) => {
@@ -691,6 +693,7 @@ fn placeholder_cast(idx: usize, query: &CompiledQuery) -> Option<&'static str> {
         .and_then(|v| match v {
             SqlValue::Text(s) if is_date(s) => Some("::date"),
             SqlValue::Text(s) if is_timestamp(s) => Some("::timestamp"),
+            SqlValue::Vector(_) => Some("::vector"),
             _ => None,
         })
 }
@@ -702,6 +705,7 @@ fn postgres_cast_for_type(data_type: &str) -> Option<&'static str> {
         "DateTimeField" | "DateTimeTzField" | "DateTimeTZField" => Some("::timestamp"),
         "TimeField" => Some("::time"),
         "JSONField" => Some("::jsonb"),
+        "VectorField" => Some("::vector"),
         // "UUIDField" => Some("::uuid"),
         "AutoField" | "BigAutoField" | "SmallAutoField" => Some("::serial"),
         _ => None,
