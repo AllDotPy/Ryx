@@ -201,6 +201,8 @@ fn rust_type_to_sql(ty: &Type, field_attr: &FieldAttr) -> String {
         "NaiveTime" | "Time" => "TIME".to_string(),
         "Uuid" => "UUID".to_string(),
         "serde_json::Value" | "Value" => "JSONB".to_string(),
+        // File storage: the column holds the stored name/path.
+        "StoredFile" => "VARCHAR(255)".to_string(),
         _ => "TEXT".to_string(), // fallback
     }
 }

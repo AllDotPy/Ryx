@@ -9,19 +9,26 @@ pub mod objects;
 pub mod q;
 pub mod queryset;
 pub mod row;
+pub mod storage;
 pub mod stream;
 pub mod transaction;
 
 use std::sync::OnceLock;
 
 // Re-export key traits and types for convenience
-pub use config::{is_initialized, RyxConfig, PoolConfigSection, MigrationsConfig};
+pub use config::{is_initialized, RyxConfig, PoolConfigSection, MigrationsConfig, StorageConfig};
 pub use model::{FieldMeta, Model, RelationMeta, Relationships};
 pub use objects::{InsertBuilder, ObjectsManager};
 pub use q::Q;
 pub use queryset::QuerySet;
 pub use row::FromRow;
 pub use transaction::transaction;
+
+// Re-export file storage types
+pub use storage::{
+    clear_storage, configure_storage, get_storage, InMemoryStorage, LocalStorage, Storage,
+    StoredFile,
+};
 
 /// Initialize the global `tracing` subscriber from `RYX_LOG_LEVEL`.
 ///
