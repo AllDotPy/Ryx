@@ -707,7 +707,6 @@ fn postgres_cast_for_type(data_type: &str) -> Option<&'static str> {
         "JSONField" => Some("::jsonb"),
         "VectorField" => Some("::vector"),
         // "UUIDField" => Some("::uuid"),
-        "AutoField" | "BigAutoField" | "SmallAutoField" => Some("::serial"),
         _ => None,
     }
 }
@@ -784,11 +783,18 @@ fn decode_with_spec(
             .try_get::<bool, _>(ord)
             .map(SqlValue::Bool)
             .unwrap_or(SqlValue::Null),
-        "IntegerField" | "BigIntField" | "SmallIntField" | "AutoField" | "BigAutoField"
-        | "SmallAutoField" | "PositiveIntField" => row
-            .try_get::<i64, _>(ord)
-            .map(SqlValue::Int)
-            .unwrap_or(SqlValue::Null),
+        "IntegerField" | "IntField" | "BigIntField" | "SmallIntField" | "AutoField" | "BigAutoField"
+        | "SmallAutoField" | "PositiveIntField" => {
+            // Tolerate integer (int4), bigint (int8) and float PK columns.
+            match row.try_get::<i64, _>(ord) {
+                Ok(v) => SqlValue::Int(v),
+                Err(_) => row
+                    .try_get::<i32, _>(ord)
+                    .map(|v| SqlValue::Int(v as i64))
+                    .or_else(|_| row.try_get::<f64, _>(ord).map(|v| SqlValue::Int(v as i64)))
+                    .unwrap_or(SqlValue::Null),
+            }
+        }
         "FloatField" => row
             .try_get::<f64, _>(ord)
             .map(SqlValue::Float)
@@ -809,10 +815,7 @@ fn decode_with_spec(
             .try_get::<String, _>(ord)
             .map(SqlValue::Text)
             .unwrap_or(SqlValue::Null),
-        "DateTimeField" => row
-            .try_get::<String, _>(ord)
-            .map(SqlValue::DateTime)
-            .unwrap_or(SqlValue::Null),
+        "DateTimeField" => decode_timestamp(row, ord),
         "DateField" => row
             .try_get::<String, _>(ord)
             .map(SqlValue::Date)
@@ -827,6 +830,16 @@ fn decode_with_spec(
             .unwrap_or(SqlValue::Null),
         _ => decode_heuristic(row, ord, &spec.name),
     }
+}
+
+fn decode_timestamp(row: &AnyRow, ord: usize) -> SqlValue {
+    // PostgreSQL stores native TIMESTAMP (chrono); SQLite stores TEXT.
+    if let Ok(dt) = row.try_get::<chrono::NaiveDateTime, _>(ord) {
+        return SqlValue::DateTime(dt.format("%Y-%m-%dT%H:%M:%S%.f").to_string());
+    }
+    row.try_get::<String, _>(ord)
+        .map(SqlValue::DateTime)
+        .unwrap_or(SqlValue::Null)
 }
 
 fn decode_heuristic(
@@ -852,6 +865,8 @@ fn decode_heuristic(
         } else {
             SqlValue::Int(i)
         }
+    } else if let Ok(i) = row.try_get::<i32, _>(column) {
+        SqlValue::Int(i as i64)
     } else if let Ok(b) = row.try_get::<bool, _>(column) {
         SqlValue::Bool(b)
     } else if let Ok(f) = row.try_get::<f64, _>(column) {

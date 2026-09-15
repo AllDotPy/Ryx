@@ -258,6 +258,7 @@ class QuerySet:
         _annotations: Optional[List[dict]] = None,
         _group_by: Optional[List[str]] = None,
         _using: Optional[str] = None,
+        _schema: Optional[str] = None,
     ) -> None:
 
         self._model = model
@@ -266,6 +267,7 @@ class QuerySet:
         self._annotations = _annotations or []
         self._group_by = _group_by or []
         self._using = _using
+        self._schema = _schema
 
     def _clone(self, **overrides) -> "QuerySet":
         return QuerySet(
@@ -275,6 +277,7 @@ class QuerySet:
             _annotations=overrides.get("_annotations", list(self._annotations)),
             _group_by=overrides.get("_group_by", list(self._group_by)),
             _using=overrides.get("_using", self._using),
+            _schema=overrides.get("_schema", self._schema),
         )
 
     def _with_op(self, tag: str, payload) -> "QuerySet":
@@ -318,6 +321,31 @@ class QuerySet:
                 field._validate_lookup(lookup)
 
     ##  Filtering
+    def _coerce_filter_value(self, field_name: str, lookup: str, val: Any) -> Any:
+        """Coerce a filter value to the field's Python type.
+
+        PostgreSQL is strict about types: a URL path parameter arrives as a
+        string, but integer/FK columns require an integer. SQLite's loose typing
+        hid this mismatch.
+        """
+        if val is None or isinstance(val, bool):
+            return val
+        if lookup not in ("exact", "gt", "gte", "lt", "lte"):
+            return val
+        field = self._model._meta.fields.get(field_name)
+        if field is None:
+            return val
+        cls_name = type(field).__name__
+        if cls_name in (
+            "IntField", "AutoField", "BigIntField", "SmallIntField",
+            "PositiveIntField", "ForeignKey",
+        ):
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                return val
+        return val
+
     def filter(self, *q_args: Q, **kwargs: Any) -> "QuerySet":
         """Add WHERE conditions (AND-ed). Accepts Q objects and kwargs.
 
@@ -340,6 +368,7 @@ class QuerySet:
                 if key == "pk":
                     key = self._model._meta.pk_field.attname
                 field, lookup = _parse_lookup_key(key)
+                val = self._coerce_filter_value(field, lookup, val)
                 batch.append((field, lookup, val, False))
             ops.append(("filters", batch))
 
@@ -663,10 +692,14 @@ class QuerySet:
     def schema(self, schema: str) -> "QuerySet":
         """Set the database schema for this query (PostgreSQL multi-schema).
 
-        Example::
+        Instances fetched through this QuerySet remember the schema, so
+        ``instance.save()`` / ``instance.delete()`` target the same schema::
+
             posts = await Post.objects.schema("tenant1").filter(active=True)
         """
-        return self._with_op("schema", schema)
+        qs = self._with_op("schema", schema)
+        qs._schema = schema
+        return qs
 
     # Evaluation (async)
     def cache(
@@ -750,7 +783,15 @@ class QuerySet:
         builder = self._materialize_builder(alias)
 
         raw_rows = await builder.fetch_all()
-        return [self._model._from_row(row) for row in raw_rows]
+        return self._hydrate(raw_rows)
+
+    def _hydrate(self, raw_rows: list) -> list:
+        """Map raw rows to model instances, propagating the schema."""
+        instances = [self._model._from_row(row) for row in raw_rows]
+        if self._schema:
+            for inst in instances:
+                inst._schema = self._schema
+        return instances
 
     async def count(self) -> int:
         alias = self._resolve_db_alias("read")
@@ -765,7 +806,12 @@ class QuerySet:
         builder = self._materialize_builder(alias)
 
         raw = await builder.set_limit(1).fetch_first()
-        return None if raw is None else self._model._from_row(raw)
+        if raw is None:
+            return None
+        inst = self._model._from_row(raw)
+        if self._schema:
+            inst._schema = self._schema
+        return inst
 
     async def get(self, *q_args: Q, **kwargs: Any) -> "Model":
         """Return exactly one instance. Raises DoesNotExist / MultipleObjectsReturned."""
@@ -788,7 +834,10 @@ class QuerySet:
                     f"get() returned more than one {self._model.__name__}."
                 ) from e
             raise
-        return self._model._from_row(raw)
+        inst = self._model._from_row(raw)
+        if qs._schema:
+            inst._schema = qs._schema
+        return inst
 
     async def exists(self) -> bool:
         alias = self._resolve_db_alias("read")

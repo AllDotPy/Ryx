@@ -7,12 +7,26 @@ pub mod sqlite;
 use ryx_common::errors::{RyxError, RyxResult};
 use ryx_query::{
     ast::{QueryNode, SqlValue},
+    Backend,
     compiler::CompiledQuery,
 };
 use sqlx::{Executor, MySqlConnection, PgConnection, SqliteConnection, Transaction};
 
 use crate::pool::{PoolStats, RyxPool};
 use crate::utils::decode_rows;
+
+/// Schema-qualify a table name: `"schema"."table"` when `schema` is set,
+/// otherwise just `"table"`.
+///
+/// Only meaningful on PostgreSQL (which supports schemas); other backends
+/// must pass an empty `schema`.
+pub fn qualify_table(schema: &str, table: &str) -> String {
+    if schema.is_empty() {
+        format!("\"{table}\"")
+    } else {
+        format!("\"{schema}\".\"{table}\"")
+    }
+}
 
 /// Unified connection enum to avoid dynamic dispatch in the hot path.
 #[derive(Debug)]
@@ -81,7 +95,8 @@ impl RyxTransaction {
     pub async fn execute_query(&mut self, query: CompiledQuery) -> RyxResult<u64> {
         match self {
             RyxTransaction::Postgres(tx) => {
-                let mut q = sqlx::query(&query.sql);
+                let sql = postgres::PostgresBackend::normalize_postgres_sql(&query);
+                let mut q = sqlx::query::<sqlx::Postgres>(&sql);
                 for v in &query.values {
                     q = bind_pg(q, v);
                 }
@@ -119,7 +134,8 @@ impl RyxTransaction {
     pub async fn fetch_query(&mut self, query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
         match self {
             RyxTransaction::Postgres(tx) => {
-                let mut q = sqlx::query(&query.sql);
+                let sql = postgres::PostgresBackend::normalize_postgres_sql(&query);
+                let mut q = sqlx::query::<sqlx::Postgres>(&sql);
                 for v in &query.values {
                     q = bind_pg(q, v);
                 }
@@ -235,6 +251,7 @@ pub trait RyxBackend: Send + Sync + 'static {
         returning_id: bool,
         ignore_conflicts: bool,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult>;
     async fn bulk_delete(
         &self,
@@ -242,6 +259,7 @@ pub trait RyxBackend: Send + Sync + 'static {
         pk_col: String,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult>;
     async fn bulk_update(
         &self,
@@ -251,6 +269,7 @@ pub trait RyxBackend: Send + Sync + 'static {
         field_values: Vec<Vec<SqlValue>>,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult>;
     async fn execute_raw(&self, sql: String, db_alias: Option<String>) -> RyxResult<()>;
     fn pool_stats(&self) -> PoolStats;

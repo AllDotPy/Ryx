@@ -71,6 +71,7 @@ async def bulk_create(
     batch_size: int = 500,
     validate: bool = False,
     ignore_conflicts: bool = False,
+    schema: Optional[str] = None,
 ) -> List["Model"]:
     """Insert many model instances in batches.
 
@@ -116,6 +117,13 @@ async def bulk_create(
     for inst in instances:
         _apply_auto_timestamps(inst, created=True)
 
+    # Commit staged field files (e.g. FileField) before building rows.
+    for inst in instances:
+        for _field in model._meta.fields.values():
+            _hook = getattr(_field, "before_save", None)
+            if _hook is not None:
+                await _hook(inst, True)
+
     # Determine which fields to insert (non-pk, editable + auto_now_add)
     fields = [
         f
@@ -132,6 +140,7 @@ async def bulk_create(
     # Process in batches — all SQL and execution handled in Rust
     alias = _resolve_alias(model)
     backend = _detect_backend(alias)
+    schema = schema or model._meta.schema or ""
     for batch in _chunked(instances, batch_size):
         rows = [[f.to_db(getattr(inst, f.attname)) for f in fields] for inst in batch]
 
@@ -144,6 +153,7 @@ async def bulk_create(
             returning_ids,
             ignore_conflicts,
             alias,
+            schema,
         )
         if pk_field:
             if isinstance(res, list):
@@ -254,6 +264,7 @@ async def bulk_update(
     fields: List[str],
     *,
     batch_size: int = 500,
+    schema: Optional[str] = None,
 ) -> int:
     """Update specific fields on many instances using CASE WHEN.
 
@@ -303,6 +314,13 @@ async def bulk_update(
     }
     total = 0
 
+    # Commit staged field files (e.g. FileField) before building values.
+    for inst in instances:
+        for _field in field_objs.values():
+            _hook = getattr(_field, "before_save", None)
+            if _hook is not None:
+                await _hook(inst, False)
+
     col_names: List[str] = []
     field_values: List[List[object]] = []
     for batch in _chunked(instances, batch_size):
@@ -327,6 +345,7 @@ async def bulk_update(
             continue
 
     alias = _resolve_alias(model)
+    schema = schema or model._meta.schema or ""
     result = await _core.bulk_update(
         table,
         pk_col,
@@ -334,6 +353,7 @@ async def bulk_update(
         field_values,
         pks,
         alias,
+        schema,
     )
     total += result
 
@@ -346,6 +366,7 @@ async def bulk_delete(
     instances: Sequence["Model"],
     *,
     batch_size: int = 500,
+    schema: Optional[str] = None,
 ) -> int:
     """Delete many model instances in batched DELETE ... WHERE pk IN (...) queries.
 
@@ -380,9 +401,10 @@ async def bulk_delete(
 
     total = 0
     alias = _resolve_alias(model)
+    schema = schema or model._meta.schema or ""
     for batch in _chunked(pks, batch_size):
         total += await _core.bulk_delete(
-            model._meta.table_name, pk_field.column, list(batch), alias
+            model._meta.table_name, pk_field.column, list(batch), alias, schema
         )
     return total
 

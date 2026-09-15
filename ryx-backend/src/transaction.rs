@@ -129,12 +129,21 @@ impl TransactionHandle {
     }
 
     /// Execute a raw SQL string within this transaction.
-    async fn execute_raw(&self, sql: &str) -> RyxResult<()> {
+    pub async fn execute_raw(&self, sql: &str) -> RyxResult<()> {
         let mut guard = self.inner.lock().await;
         let tx = guard.as_mut().ok_or_else(|| {
             RyxError::Internal("Transaction already committed or rolled back".into())
         })?;
         tx.execute_raw(sql).await
+    }
+
+    /// Fetch raw SQL rows within this transaction.
+    pub async fn fetch_raw(&self, sql: &str) -> RyxResult<Vec<RowView>> {
+        let mut guard = self.inner.lock().await;
+        let tx = guard.as_mut().ok_or_else(|| {
+            RyxError::Internal("Transaction already committed or rolled back".into())
+        })?;
+        tx.fetch_raw(sql).await
     }
 
     /// Fetch rows within this transaction.

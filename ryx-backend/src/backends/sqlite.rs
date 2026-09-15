@@ -206,6 +206,12 @@ impl RyxBackend for SqliteBackend {
         sql: String,
         _db_alias: Option<String>,
     ) -> RyxResult<Vec<DecodedRow>> {
+        if let Some(tx) = get_current_transaction() {
+            let tx_guard = tx.lock().await;
+            if let Some(active_tx) = tx_guard.as_ref() {
+                return active_tx.fetch_raw(&sql).await;
+            }
+        }
         let rows = sqlx::query::<sqlx::Sqlite>(&sql)
             .fetch_all(&self.pool)
             .await
@@ -225,7 +231,7 @@ impl RyxBackend for SqliteBackend {
     /// ```
     async fn fetch_all_compiled(&self, node: QueryNode) -> RyxResult<Vec<DecodedRow>> {
         let compiled = compile(&node).map_err(RyxError::from)?;
-        self.__fetch_all(compiled).await
+        self.fetch_all(compiled).await
     }
 
     /// Execute a SELECT COUNT(*) query and return the count.
@@ -471,6 +477,7 @@ impl RyxBackend for SqliteBackend {
         returning_id: bool,
         ignore_conflicts: bool,
         _db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         if rows.is_empty() {
             return Ok(MutationResult {
@@ -529,9 +536,9 @@ impl RyxBackend for SqliteBackend {
         };
 
         let sql = format!(
-            "{} \"{}\" ({}) VALUES {}{}{}",
+            "{} {} ({}) VALUES {}{}{}",
             insert_kw,
-            table,
+            crate::backends::qualify_table(&schema, &table),
             col_list,
             values_sql,
             conflict_suffix,
@@ -570,6 +577,7 @@ impl RyxBackend for SqliteBackend {
         pk_col: String,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         if pks.is_empty() {
             return Ok(MutationResult {
@@ -584,7 +592,12 @@ impl RyxBackend for SqliteBackend {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let sql = format!("DELETE FROM \"{}\" WHERE \"{}\" IN ({})", table, pk_col, ph);
+        let sql = format!(
+            "DELETE FROM {} WHERE \"{}\" IN ({})",
+            crate::backends::qualify_table(&schema, &table),
+            pk_col,
+            ph
+        );
         debug!(
             target: "ryx::bulk_delete",
             db_alias = db_alias.as_deref().unwrap_or("default"),
@@ -613,6 +626,7 @@ impl RyxBackend for SqliteBackend {
         field_values: Vec<Vec<SqlValue>>,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         // let pool = pool::get(db_alias.as_deref())?;
         // let backend = pool::get_backend(db_alias.as_deref())?;
@@ -653,8 +667,8 @@ impl RyxBackend for SqliteBackend {
         }
 
         let sql = format!(
-            "UPDATE \"{}\" SET {} WHERE \"{}\" IN ({})",
-            table,
+            "UPDATE {} SET {} WHERE \"{}\" IN ({})",
+            crate::backends::qualify_table(&schema, &table),
             case_clauses.join(", "),
             pk_col,
             pk_placeholders.join(", ")
@@ -683,7 +697,12 @@ impl RyxBackend for SqliteBackend {
     /// Execute raw SQL without bind params.
     #[instrument(skip(sql, self))]
     async fn execute_raw(&self, sql: String, _db_alias: Option<String>) -> RyxResult<()> {
-        // let pool = pool::get(db_alias.as_deref())?;
+        if let Some(tx) = get_current_transaction() {
+            let tx_guard = tx.lock().await;
+            if let Some(active_tx) = tx_guard.as_ref() {
+                return active_tx.execute_raw(&sql).await;
+            }
+        }
         sqlx::query(&sql)
             .execute(&self.pool)
             .await

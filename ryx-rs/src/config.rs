@@ -45,6 +45,10 @@ pub struct RyxConfig {
     /// Migration settings.
     #[serde(default)]
     pub migrations: MigrationsConfig,
+
+    /// File storage settings.
+    #[serde(default)]
+    pub storage: StorageConfig,
 }
 
 /// Pool configuration section — mirrors the Python `[pool]` block.
@@ -93,12 +97,75 @@ impl Default for MigrationsConfig {
     }
 }
 
+/// Storage configuration section — mirrors the Python `[storage]` block.
+///
+/// ```toml
+/// [storage]
+/// backend = "local"
+/// root = "media/"
+/// base_url = "/media/"
+/// ```
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StorageConfig {
+    /// Backend kind: `"local"` (default) or `"memory"`.
+    #[serde(default)]
+    pub backend: Option<String>,
+    /// Local storage root directory.
+    #[serde(default)]
+    pub root: Option<String>,
+    /// Public URL prefix.
+    #[serde(default)]
+    pub base_url: Option<String>,
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            backend: None,
+            root: None,
+            base_url: None,
+        }
+    }
+}
+
+impl StorageConfig {
+    /// Build and configure a global storage backend from this section.
+    ///
+    /// No-op when `backend` is not set.
+    pub fn configure(&self) {
+        match self.backend.as_deref() {
+            Some("memory") | Some("inmemory") | Some("in_memory") => {
+                let s = crate::storage::InMemoryStorage::new();
+                let s = match &self.base_url {
+                    Some(u) => s.with_base_url(u.clone()),
+                    None => s,
+                };
+                crate::storage::configure_storage(s);
+            }
+            Some(_) => {
+                let root = self
+                    .root
+                    .clone()
+                    .unwrap_or_else(|| "media".to_string());
+                let s = crate::storage::LocalStorage::new(root);
+                let s = match &self.base_url {
+                    Some(u) => s.with_base_url(u.clone()),
+                    None => s,
+                };
+                crate::storage::configure_storage(s);
+            }
+            None => {}
+        }
+    }
+}
+
 impl Default for RyxConfig {
     fn default() -> Self {
         Self {
             urls: HashMap::new(),
             pool: PoolConfigSection::default(),
             migrations: MigrationsConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -215,6 +282,23 @@ impl RyxConfig {
                 self.pool.max_lifetime = self.pool.max_lifetime.or(Some(n));
             }
         }
+
+        // Storage settings (env fills gaps only)
+        if let Ok(v) = std::env::var("RYX_STORAGE_BACKEND") {
+            if self.storage.backend.is_none() {
+                self.storage.backend = Some(v);
+            }
+        }
+        if let Ok(v) = std::env::var("RYX_STORAGE_ROOT") {
+            if self.storage.root.is_none() {
+                self.storage.root = Some(v);
+            }
+        }
+        if let Ok(v) = std::env::var("RYX_STORAGE_BASE_URL") {
+            if self.storage.base_url.is_none() {
+                self.storage.base_url = Some(v);
+            }
+        }
     }
 
     /// Build a `PoolConfig` and initialize the global database pool.
@@ -248,10 +332,12 @@ pub fn is_initialized() -> bool {
 /// Returns `Ok(())` even if no config is found (no-op). Errors only on
 /// pool initialization failure.
 pub async fn init() -> RyxResult<()> {
+    let config = RyxConfig::load();
+    // Configure storage from [storage] / RYX_STORAGE_* (idempotent).
+    config.storage.configure();
     if is_initialized() {
         return Ok(());
     }
-    let config = RyxConfig::load();
     // If no URLs are configured, this is a no-op — the user must call
     // `RyxConfig::load().init_pool().await` or `ryx_rs::setup()` manually.
     if config.urls.is_empty() {

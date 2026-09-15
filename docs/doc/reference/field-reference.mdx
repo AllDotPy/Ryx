@@ -128,16 +128,24 @@ publish_date = DateField(null=True)
 | `JSONField` | `JSONB` | `dict | list` | JSON lookups/transforms |
 | `ArrayField` | `<base>[]` | `list` | `base_field` |
 | `BinaryField` | `BYTEA` | `bytes` | — |
+| `FileField` | `VARCHAR(255)` | `FieldFile` | `upload_to`, `storage`, `max_length` |
+| `ImageField` | `VARCHAR(255)` | `FieldFile` | `upload_to`, `storage`, `width_field`, `height_field` |
 
 ```python
 uid = UUIDField(auto_create=True, unique=True)
 metadata = JSONField(default=dict)
 tags = ArrayField(CharField(max_length=40), default=list)
 payload = BinaryField(null=True)
+resume = FileField(upload_to="resumes/", null=True)
+avatar = ImageField(upload_to="avatars/", width_field="width", height_field="height")
 ```
 
 JSON lookups include `has_key`, `has_any`, `has_all`, `contains`, and
 `contained_by`. JSON transforms include `key`, `key_text`, and `json`.
+
+`FileField` / `ImageField` store the file's name/path via a pluggable storage
+backend (local filesystem by default). See
+**[File & Image Fields](/advanced/file-storage)** for the full guide.
 
 ## Relationship Fields
 

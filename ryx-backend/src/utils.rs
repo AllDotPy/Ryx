@@ -20,6 +20,7 @@ where
     usize: sqlx::ColumnIndex<T>,
     bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i32: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
 {
@@ -49,6 +50,7 @@ where
     usize: sqlx::ColumnIndex<T>,
     bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i32: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
 {
@@ -78,6 +80,7 @@ where
     usize: sqlx::ColumnIndex<T>,
     bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i32: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
 {
@@ -102,6 +105,7 @@ where
     usize: sqlx::ColumnIndex<T>,
     bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i32: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
 {
@@ -111,11 +115,18 @@ where
             .try_get::<bool, _>(ord)
             .map(SqlValue::Bool)
             .unwrap_or(SqlValue::Null),
-        "IntegerField" | "BigIntField" | "SmallIntField" | "AutoField" | "BigAutoField"
-        | "SmallAutoField" | "PositiveIntField" => row
-            .try_get::<i64, _>(ord)
-            .map(SqlValue::Int)
-            .unwrap_or(SqlValue::Null),
+        "IntegerField" | "IntField" | "BigIntField" | "SmallIntField" | "AutoField" | "BigAutoField"
+        | "SmallAutoField" | "PositiveIntField" => {
+            // Tolerate integer (int4), bigint (int8) and float PK columns.
+            match row.try_get::<i64, _>(ord) {
+                Ok(v) => SqlValue::Int(v),
+                Err(_) => row
+                    .try_get::<i32, _>(ord)
+                    .map(|v| SqlValue::Int(v as i64))
+                    .or_else(|_| row.try_get::<f64, _>(ord).map(|v| SqlValue::Int(v as i64)))
+                    .unwrap_or(SqlValue::Null),
+            }
+        }
         "FloatField" => row
             .try_get::<f64, _>(ord)
             .map(SqlValue::Float)
@@ -161,6 +172,7 @@ where
     usize: sqlx::ColumnIndex<T>,
     bool: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     i64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
+    i32: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     f64: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
     String: sqlx::Type<T::Database> + for<'r> sqlx::Decode<'r, T::Database>,
 {
@@ -182,6 +194,8 @@ where
         } else {
             SqlValue::Int(i)
         }
+    } else if let Ok(i) = row.try_get::<i32, _>(column) {
+        SqlValue::Int(i as i64)
     } else if let Ok(b) = row.try_get::<bool, _>(column) {
         SqlValue::Bool(b)
     } else if let Ok(f) = row.try_get::<f64, _>(column) {

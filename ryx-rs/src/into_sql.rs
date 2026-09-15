@@ -74,3 +74,10 @@ impl<T: IntoSqlValue> IntoSqlValue for Vec<T> {
         )
     }
 }
+
+// Stored file — persisted as its stored name/path (TEXT).
+impl IntoSqlValue for crate::storage::StoredFile {
+    fn into_sql_value(self) -> SqlValue {
+        SqlValue::Text(self.into_inner())
+    }
+}

@@ -20,6 +20,18 @@ use crate::utils::{decode_row, decode_rows, is_date, is_timestamp};
 
 use tracing::{debug, instrument};
 
+/// Read the first column of a RETURNING row as an `i64`, tolerating
+/// `integer` (int4), `bigint` (int8) and float PK columns.
+fn row_id_to_i64(row: &sqlx::postgres::PgRow) -> Option<i64> {
+    if let Ok(v) = row.try_get::<i64, _>(0) {
+        return Some(v);
+    }
+    if let Ok(v) = row.try_get::<i32, _>(0) {
+        return Some(v as i64);
+    }
+    row.try_get::<f64, _>(0).ok().map(|v| v as i64)
+}
+
 pub struct PostgresBackend {
     // The connection pool for Postgres
     pool: PgPool,
@@ -104,9 +116,7 @@ impl PostgresBackend {
     }
 
     /// Rewrite generic `?` placeholders to PostgreSQL-style `$1, $2, ...` when needed.
-    pub fn normalize_sql(&self, query: &CompiledQuery) -> String {
-        // Fast path: rewrite ? -> $n and append type casts when we know the
-        // column -> field type mapping.
+    pub(crate) fn normalize_postgres_sql(query: &CompiledQuery) -> String {
         let mut out = String::with_capacity(query.sql.len() + 8);
         let mut idx = 0usize;
 
@@ -117,7 +127,7 @@ impl PostgresBackend {
                 out.push_str(&idx.to_string());
 
                 // Attach an explicit PostgreSQL cast when we know the field type.
-                if let Some(cast) = self.placeholder_cast(idx - 1, query) {
+                if let Some(cast) = Self::postgres_placeholder_cast(idx - 1, query) {
                     out.push_str(cast);
                 }
             } else {
@@ -132,12 +142,12 @@ impl PostgresBackend {
     /// We only cast INSERT/UPDATE assignment parameters where we know the exact
     /// column names; all other placeholders fall back to a lightweight heuristic
     /// so we preserve previous behaviour for filters.
-    pub fn placeholder_cast(&self, idx: usize, query: &CompiledQuery) -> Option<&'static str> {
+    pub(crate) fn postgres_placeholder_cast(idx: usize, query: &CompiledQuery) -> Option<&'static str> {
         // If we have column names (INSERT or UPDATE) and a base table, look up the
         // field in the registry to get an authoritative type.
         if let (Some(cols), Some(table)) = (&query.column_names, &query.base_table) {
             if idx < cols.len() {
-                if let Some(cast) = self.maybe_model_cast(table, &cols[idx]) {
+                if let Some(cast) = Self::postgres_maybe_model_cast(table, &cols[idx]) {
                     return Some(cast);
                 }
             }
@@ -157,11 +167,11 @@ impl PostgresBackend {
     /// Look up a field in the model registry and return its PG cast suffix.
     /// Falls back to `None` when the Python model registry is not available.
     #[inline]
-    fn maybe_model_cast(&self, table: &str, col: &str) -> Option<&'static str> {
+    pub(crate) fn postgres_maybe_model_cast(table: &str, col: &str) -> Option<&'static str> {
         #[cfg(feature = "python")]
         {
             if let Some(spec) = model_registry::lookup_field(table, col) {
-                return self.postgres_cast_for_type(&spec.data_type);
+                return Self::postgres_cast_for_type(&spec.data_type);
             }
         }
         let _ = (table, col);
@@ -169,15 +179,15 @@ impl PostgresBackend {
     }
 
     /// Map a Django-style field type string to a PostgreSQL cast suffix.
-    pub fn postgres_cast_for_type(&self, data_type: &str) -> Option<&'static str> {
+    pub(crate) fn postgres_cast_for_type(data_type: &str) -> Option<&'static str> {
         match data_type {
             "DateField" => Some("::date"),
-            "DateTimeField" | "DateTimeTzField" | "DateTimeTZField" => Some("::timestamp"),
             "TimeField" => Some("::time"),
             "JSONField" => Some("::jsonb"),
             "VectorField" => Some("::vector"),
             "UUIDField" => Some("::uuid"),
-            "AutoField" | "BigAutoField" | "SmallAutoField" => Some("::serial"),
+            // Foreign keys store the referenced PK (auto-increment integer).
+            "ForeignKey" => Some("::integer"),
             _ => None,
         }
     }
@@ -210,7 +220,7 @@ impl RyxBackend for PostgresBackend {
     /// }
     /// ```
     async fn __fetch_all(&self, query: CompiledQuery) -> RyxResult<Vec<DecodedRow>> {
-        let sql = self.normalize_sql(&query);
+        let sql = Self::normalize_postgres_sql(&query);
         let mut q = sqlx::query(&sql);
         // Bind parameters to the quer
         q = self.bind_values(q, &query.values);
@@ -268,7 +278,7 @@ impl RyxBackend for PostgresBackend {
         // let pool = pool::get(query.db_alias.as_deref())?.as_any();
         debug!(sql = %query.sql, "Executing SELECT");
 
-        // let sql = self.normalize_sql(&query);
+        // let sql = Self::normalize_postgres_sql(&query);
         // let mut q = sqlx::query::<sqlx::Postgres>(&sql);
         // q = self.bind_values(q, &query.values);
 
@@ -294,6 +304,12 @@ impl RyxBackend for PostgresBackend {
         sql: String,
         _db_alias: Option<String>,
     ) -> RyxResult<Vec<DecodedRow>> {
+        if let Some(tx) = get_current_transaction() {
+            let tx_guard = tx.lock().await;
+            if let Some(active_tx) = tx_guard.as_ref() {
+                return active_tx.fetch_raw(&sql).await;
+            }
+        }
         let rows = sqlx::query::<sqlx::Postgres>(&sql)
             .fetch_all(&self.pool)
             .await
@@ -313,7 +329,7 @@ impl RyxBackend for PostgresBackend {
     /// ```
     async fn fetch_all_compiled(&self, node: QueryNode) -> RyxResult<Vec<DecodedRow>> {
         let compiled = compile(&node).map_err(RyxError::from)?;
-        self.__fetch_all(compiled).await
+        self.fetch_all(compiled).await
     }
 
     /// Execute a SELECT COUNT(*) query and return the count.
@@ -347,7 +363,8 @@ impl RyxBackend for PostgresBackend {
 
         debug!(sql = %query.sql, "Executing COUNT");
 
-        let mut q = sqlx::query::<sqlx::Postgres>(&query.sql);
+        let sql = Self::normalize_postgres_sql(&query);
+        let mut q = sqlx::query::<sqlx::Postgres>(&sql);
         q = self.bind_values(q, &query.values);
 
         let row = q.fetch_one(&self.pool).await.map_err(RyxError::Database)?;
@@ -397,7 +414,7 @@ impl RyxBackend for PostgresBackend {
         } else {
             // let pool = pool::get(query.db_alias.as_deref())?.as_any();
 
-            let sql = self.normalize_sql(&query);
+            let sql = Self::normalize_postgres_sql(&query);
             let mut q = sqlx::query::<sqlx::Postgres>(&sql);
             q = self.bind_values(q, &query.values);
 
@@ -499,7 +516,7 @@ impl RyxBackend for PostgresBackend {
         debug!(sql = %query.sql, "Executing mutation");
 
         // Check if this is a RETURNING query (e.g. INSERT ... RETURNING id)
-        let sql = self.normalize_sql(&query);
+        let sql = Self::normalize_postgres_sql(&query);
         if sql.to_uppercase().contains("RETURNING") {
             let mut q = sqlx::query::<sqlx::Postgres>(&sql);
             q = self.bind_values(q, &query.values);
@@ -509,11 +526,8 @@ impl RyxBackend for PostgresBackend {
                 .await
                 .map_err(|e| RyxError::DatabaseWithSql(sql.clone(), e))?;
 
-            let last_insert_id = rows.first().and_then(|row| row.try_get::<i64, _>(0).ok());
-            let returned_ids: Vec<i64> = rows
-                .iter()
-                .filter_map(|row| row.try_get::<i64, _>(0).ok())
-                .collect();
+            let last_insert_id = rows.first().and_then(row_id_to_i64);
+            let returned_ids: Vec<i64> = rows.iter().filter_map(row_id_to_i64).collect();
 
             return Ok(MutationResult {
                 rows_affected: rows.len() as u64,
@@ -559,6 +573,7 @@ impl RyxBackend for PostgresBackend {
         returning_id: bool,
         ignore_conflicts: bool,
         _db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         if rows.is_empty() {
             return Ok(MutationResult {
@@ -579,7 +594,7 @@ impl RyxBackend for PostgresBackend {
         // Build placeholders once with proper casting for PostgreSQL.
         let mut placeholders: Vec<String> = Vec::with_capacity(columns.len());
         for (idx, col) in columns.iter().enumerate() {
-            let cast = self.maybe_model_cast(&table, col);
+            let cast = Self::postgres_maybe_model_cast(&table, col);
             let raw = format!("${}{}", idx + 1, cast.unwrap_or(""));
             placeholders.push(raw);
         }
@@ -620,9 +635,9 @@ impl RyxBackend for PostgresBackend {
         };
 
         let sql = format!(
-            "{} \"{}\" ({}) VALUES {}{}{}",
+            "{} {} ({}) VALUES {}{}{}",
             insert_kw,
-            table,
+            crate::backends::qualify_table(&schema, &table),
             col_list,
             values_sql,
             conflict_suffix,
@@ -661,6 +676,7 @@ impl RyxBackend for PostgresBackend {
         pk_col: String,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         if pks.is_empty() {
             return Ok(MutationResult {
@@ -670,7 +686,7 @@ impl RyxBackend for PostgresBackend {
             });
         }
 
-        let pk_cast = self.maybe_model_cast(&table, &pk_col);
+        let pk_cast = Self::postgres_maybe_model_cast(&table, &pk_col);
 
         let mut param_idx = 0usize;
         let ph = (0..pks.len())
@@ -682,7 +698,12 @@ impl RyxBackend for PostgresBackend {
             .collect::<Vec<_>>()
             .join(", ");
 
-        let sql = format!("DELETE FROM \"{}\" WHERE \"{}\" IN ({})", table, pk_col, ph);
+        let sql = format!(
+            "DELETE FROM {} WHERE \"{}\" IN ({})",
+            crate::backends::qualify_table(&schema, &table),
+            pk_col,
+            ph
+        );
         debug!(
             target: "ryx::bulk_delete",
             db_alias = db_alias.as_deref().unwrap_or("default"),
@@ -710,6 +731,7 @@ impl RyxBackend for PostgresBackend {
         field_values: Vec<Vec<SqlValue>>,
         pks: Vec<SqlValue>,
         db_alias: Option<String>,
+        schema: String,
     ) -> RyxResult<MutationResult> {
         // let pool = pool::get(db_alias.as_deref())?;
         // let backend = pool::get_backend(db_alias.as_deref())?;
@@ -725,12 +747,12 @@ impl RyxBackend for PostgresBackend {
 
         let mut case_clauses = Vec::with_capacity(f);
         let mut all_values: SmallVec<[SqlValue; 8]> = SmallVec::with_capacity(n * f * 2 + n);
-        let pk_cast = self.maybe_model_cast(&table, &pk_col);
+        let pk_cast = Self::postgres_maybe_model_cast(&table, &pk_col);
 
         // Build CASE clauses with placeholders.
         let mut param_idx: usize = 0;
         for (fi, col_name) in col_names.iter().enumerate() {
-            let value_cast = self.maybe_model_cast(&table, col_name);
+            let value_cast = Self::postgres_maybe_model_cast(&table, col_name);
 
             let mut case_parts = Vec::with_capacity(n * 3 + 2);
             case_parts.push(format!("\"{}\" = CASE \"{}\"", col_name, pk_col));
@@ -762,8 +784,8 @@ impl RyxBackend for PostgresBackend {
         }
 
         let sql = format!(
-            "UPDATE \"{}\" SET {} WHERE \"{}\" IN ({})",
-            table,
+            "UPDATE {} SET {} WHERE \"{}\" IN ({})",
+            crate::backends::qualify_table(&schema, &table),
             case_clauses.join(", "),
             pk_col,
             pk_placeholders.join(", ")
@@ -792,7 +814,12 @@ impl RyxBackend for PostgresBackend {
     /// Execute raw SQL without bind params.
     #[instrument(skip(sql, self))]
     async fn execute_raw(&self, sql: String, _db_alias: Option<String>) -> RyxResult<()> {
-        // let pool = pool::get(db_alias.as_deref())?;
+        if let Some(tx) = get_current_transaction() {
+            let tx_guard = tx.lock().await;
+            if let Some(active_tx) = tx_guard.as_ref() {
+                return active_tx.execute_raw(&sql).await;
+            }
+        }
         sqlx::query(&sql)
             .execute(&self.pool)
             .await
