@@ -233,6 +233,13 @@ impl PyQueryBuilder {
         })
     }
 
+    /// Set the database schema for PostgreSQL multi-schema support.
+    fn set_schema(&self, schema: String) -> PyResult<PyQueryBuilder> {
+        Ok(PyQueryBuilder {
+            node: Arc::new(self.node.as_ref().clone().with_schema(schema)),
+        })
+    }
+
     fn add_filter(
         &self,
         field: String,
@@ -901,13 +908,14 @@ fn fetch_with_params<'py>(
 ///
 /// But avoids 3 separate FFI crossings and intermediate allocations.
 #[pyfunction]
-#[pyo3(signature = (table, pk_col, pks, alias=None))]
+#[pyo3(signature = (table, pk_col, pks, alias=None, schema=None))]
 fn bulk_delete<'py>(
     py: Python<'py>,
     table: String,
     pk_col: String,
     pks: Vec<Bound<'_, PyAny>>,
     alias: Option<String>,
+    schema: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let pk_list = PyList::new(py, pks)?;
     let pk_values = py_int_list_to_sql_values(&pk_list)?;
@@ -917,7 +925,7 @@ fn bulk_delete<'py>(
         let b = pool::get(alias.as_deref()).into_py()?;
 
         let result = b
-            .bulk_delete(table, pk_col, pk_values, alias)
+            .bulk_delete(table, pk_col, pk_values, alias, schema.unwrap_or_default())
             .await
             .map_err(err_to_py)?;
         Python::attach(|py| {
@@ -929,7 +937,7 @@ fn bulk_delete<'py>(
 
 /// Bulk insert: values are mapped in Rust then executed in a single FFI call.
 #[pyfunction]
-#[pyo3(signature = (table, columns, rows, returning_id=true, ignore_conflicts=false, alias=None))]
+#[pyo3(signature = (table, columns, rows, returning_id=true, ignore_conflicts=false, alias=None, schema=None))]
 fn bulk_insert<'py>(
     py: Python<'py>,
     table: String,
@@ -938,6 +946,7 @@ fn bulk_insert<'py>(
     returning_id: bool,
     ignore_conflicts: bool,
     alias: Option<String>,
+    schema: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let mut rust_rows: Vec<Vec<SqlValue>> = Vec::with_capacity(rows.len());
     for row in rows {
@@ -959,6 +968,7 @@ fn bulk_insert<'py>(
                 returning_id,
                 ignore_conflicts,
                 alias,
+                schema.unwrap_or_default(),
             )
             .await
             .map_err(err_to_py)?;
@@ -976,7 +986,7 @@ fn bulk_insert<'py>(
 
 /// Bulk update using CASE WHEN in a single FFI call (multi-db aware).
 #[pyfunction]
-#[pyo3(signature = (table, pk_col, columns, field_values, pks, alias=None))]
+#[pyo3(signature = (table, pk_col, columns, field_values, pks, alias=None, schema=None))]
 fn bulk_update<'py>(
     py: Python<'py>,
     table: String,
@@ -985,6 +995,7 @@ fn bulk_update<'py>(
     field_values: Vec<Vec<Bound<'_, PyAny>>>,
     pks: Vec<Bound<'_, PyAny>>,
     alias: Option<String>,
+    schema: Option<String>,
 ) -> PyResult<Bound<'py, PyAny>> {
     if field_values.len() != columns.len() {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -1008,7 +1019,7 @@ fn bulk_update<'py>(
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
         let b = pool::get(alias.as_deref()).into_py()?;
         let result = b
-            .bulk_update(table, pk_col, columns, rust_field_values, pk_values, alias)
+            .bulk_update(table, pk_col, columns, rust_field_values, pk_values, alias, schema.unwrap_or_default())
             .await
             .map_err(err_to_py)?;
         Python::attach(|py| {
