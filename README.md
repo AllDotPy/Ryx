@@ -111,24 +111,6 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
    <img src="https://github.com/AllDotPy/Ryx/blob/master/ryx_architecture.svg?raw=true" alt="Ryx Architecture" width="100%" />
 </p>
 
-```
-          Python (ryx-python)        Rust (ryx-rs)
-                │                         │
-          PyO3 bridge ────────╗       no pyo3
-                │             ║           │
-          ┌─────┴─────────────║───────────┴──────┐
-          │      ryx-core     ║     ryx-common   │
-          └─────┬─────────────║───────────┬──────┘
-                │             ║           │
-          ┌─────┴─────────────║───────────┴──────┐
-          │         ryx-query (SQL compiler)     │
-          └───────────────────┬──────────────────┘
-                              │
-          ┌───────────────────┴──────────────────┐
-          │          ryx-backend (sqlx)          │
-          │    Postgres · MySQL · SQLite         │
-          └──────────────────────────────────────┘
-```
 
 ## Performance
 
