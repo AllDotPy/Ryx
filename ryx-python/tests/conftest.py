@@ -56,6 +56,12 @@ if "PYTEST_CURRENT_TEST" in os.environ:
             new_qb._joins = self._joins[:]
             return new_qb
 
+        def set_using(self, alias):
+            return self
+
+        def set_schema(self, schema):
+            return self
+
         def set_limit(self, n):
             new_qb = MockQueryBuilder(self._table)
             new_qb._filters = self._filters[:]
