@@ -98,6 +98,66 @@ let posts: Vec<Post> = Post::objects()
     .all().await?;
 ```
 
+## Writing Data
+
+Schema is honoured on **all** write paths — `create()`, `save()`, `delete()`,
+and the bulk operations.
+
+### Manager-bound schema (Python)
+
+```python
+tenant1 = Post.objects.schema("tenant1")
+
+await tenant1.create(title="Hello")        # INSERT INTO "tenant1"."posts"
+posts = await tenant1.filter(active=True)  # SELECT FROM "tenant1"."posts"
+```
+
+### Instances remember their schema
+
+```python
+post = await Post.objects.schema("tenant1").get(id=1)
+post.title = "Updated"
+await post.save()       # UPDATE "tenant1"."posts"
+await post.delete()     # DELETE FROM "tenant1"."posts"
+```
+
+### Per-model default schema
+
+Declare a default schema in `Meta`:
+
+```python
+class Post(Model):
+    class Meta:
+        table_name = "posts"
+        schema = "tenant1"
+    # ...
+
+post = await Post.objects.create(title="x")  # INSERT INTO "tenant1"."posts"
+```
+
+### Bulk operations
+
+```python
+from ryx import bulk_create, bulk_update, bulk_delete
+
+await bulk_create(Post, [Post(title="a"), Post(title="b")], schema="tenant1")
+await bulk_update(Post, posts, fields=["title"], schema="tenant1")
+await bulk_delete(Post, posts, schema="tenant1")
+```
+
+### Rust
+
+```rust
+// INSERT with schema
+let _ = Post::objects().create()
+    .schema("tenant1")
+    .set("title", "Hello")
+    .save().await?;
+
+// Reads
+let posts: Vec<Post> = Post::objects().schema("tenant1").all().await?;
+```
+
 ## Creating Schemas
 
 Ryx auto-creates schemas during migration if they don't exist. The `CREATE SCHEMA IF NOT EXISTS` statement is issued before any table DDL when a schema is specified.

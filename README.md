@@ -102,6 +102,7 @@ Full docs, guides, API reference: **[ryx.alldotpy.com](https://ryx.alldotpy.com)
 | **Migrations** | Diesel CLI | sea-orm-cli | **Built-in** |
 | **PostgreSQL schemas** | ❌ | ❌ | ✅ |
 | **Vector search (pgvector)** | ❌ | ❌ | ✅ |
+| **File/Image fields + storage** | ❌ | ❌ | ✅ |
 | **Backends** | PG · MySQL · SQLite | PG · MySQL · SQLite | **PG · MySQL · SQLite** |
 
 ## Architecture

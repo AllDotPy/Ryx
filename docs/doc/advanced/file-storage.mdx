@@ -1,0 +1,214 @@
+---
+sidebar_position: 14
+title: File & Image Fields (Storage)
+description: Store files and images with pluggable storage backends.
+---
+
+Ryx provides `FileField` and `ImageField` backed by a **pluggable storage layer**. The default backend is the local filesystem; the database stores only the file's name/path, while the bytes live in the storage backend.
+
+Custom backends (S3, GCS, Azure Blob, …) implement a small async `Storage` interface and register globally — no Ryx changes needed.
+
+## Storage Backends
+
+### Configure the default storage
+
+**Python:**
+
+```python
+from ryx import configure_storage, FileSystemStorage
+
+configure_storage(FileSystemStorage(root="media/", base_url="/media/"))
+```
+
+**Rust:**
+
+```rust
+use ryx_rs::storage::{configure_storage, LocalStorage};
+
+configure_storage(LocalStorage::new("media/").with_base_url("/media/"));
+```
+
+### Storage trait
+
+The `Storage` interface (Python `Storage` ABC / Rust `Storage` trait):
+
+| Method | Description |
+|---|---|
+| `save(name, content) -> name` | Write bytes, resolve collisions, return final name |
+| `open(name) -> bytes` | Read bytes |
+| `delete(name)` | Delete (idempotent) |
+| `exists(name) -> bool` | Check existence |
+| `url(name) -> str` | Public URL |
+| `size(name) -> int` | Size in bytes |
+| `path(name) -> str` | Local path (remote backends raise) |
+| `get_available_name(name) -> str` | Collision-free name |
+
+### Custom backend
+
+**Python:**
+
+```python
+from ryx import Storage, configure_storage
+
+class S3Storage(Storage):
+    async def save(self, name, content) -> str:
+        ...  # upload, return final key
+    async def open(self, name) -> bytes:
+        ...
+    async def delete(self, name) -> None:
+        ...
+    async def exists(self, name) -> bool:
+        ...
+    def url(self, name) -> str:
+        return f"https://cdn.example.com/{name}"
+    async def size(self, name) -> int:
+        ...
+
+configure_storage(S3Storage())
+```
+
+**Rust:**
+
+```rust
+use async_trait::async_trait;
+use ryx_rs::storage::{configure_storage, Storage};
+use ryx_rs::{RyxResult, RyxError};
+
+struct S3Storage;
+#[async_trait]
+impl Storage for S3Storage {
+    async fn save(&self, name: &str, content: &[u8]) -> RyxResult<String> { ... }
+    async fn open(&self, name: &str) -> RyxResult<Vec<u8>> { ... }
+    async fn delete(&self, name: &str) -> RyxResult<()> { ... }
+    async fn exists(&self, name: &str) -> RyxResult<bool> { ... }
+    fn url(&self, name: &str) -> String { format!("https://cdn.example.com/{name}") }
+    async fn size(&self, name: &str) -> RyxResult<u64> { ... }
+}
+```
+
+## Defining File Fields
+
+### Python
+
+```python
+from ryx import Model, AutoField, CharField, FileField, ImageField
+
+class User(Model):
+    id       = AutoField(primary_key=True)
+    name     = CharField(max_length=100)
+    avatar   = ImageField(upload_to="avatars/")
+    resume   = FileField(upload_to="resumes/", null=True)
+```
+
+`upload_to` can be a directory prefix **or** a callable `(instance, filename) -> str`.
+
+### Rust
+
+```rust
+use ryx_rs::model;
+use ryx_rs::StoredFile;
+
+#[model]
+#[table("users")]
+struct User {
+    #[field(pk)] id: i64,
+    name: String,
+    avatar: StoredFile,   // VARCHAR(255) column
+}
+```
+
+## Assigning and Saving Files
+
+### Python
+
+Assignment accepts raw content (staged, committed on `save()`), an existing stored name, or a file-like object:
+
+```python
+# Staged on assignment, committed when the model is saved
+user = User(name="Ada", avatar=b"...png bytes...")
+await user.save()
+
+# Existing stored name (e.g. from another source)
+user.avatar = "avatars/ada.png"
+
+# Explicit immediate commit
+await user.avatar.save("avatars/ada_v2.png", b"...")
+
+# Read it back
+data = await user.avatar.read()
+
+# Public URL
+print(user.avatar.url)
+
+# Delete the file
+await user.avatar.delete()
+```
+
+When a row is deleted via `Model.delete()`, its stored files are removed automatically.
+
+### Rust
+
+```rust
+use ryx_rs::storage::{LocalStorage, StoredFile};
+
+let storage = LocalStorage::new("media/");
+let avatar = StoredFile::save(&storage, "avatars/a.png", &bytes).await?;
+
+let _ = User::objects()
+    .create()
+    .set("name", "Ada")
+    .set("avatar", avatar)
+    .save().await?;
+```
+
+## ImageField
+
+`ImageField` validates the file is a recognised image (PNG/JPEG/GIF/WEBP) using a magic-bytes check with no hard dependency.
+
+Install Pillow for full image validation and dimension support:
+
+```bash
+pip install ryx[images]
+```
+
+With Pillow, `ImageField` also exposes `width`/`height` and can populate dedicated width/height columns:
+
+```python
+class Photo(Model):
+    id       = AutoField(primary_key=True)
+    image    = ImageField(upload_to="photos/", width_field="width", height_field="height")
+    width    = IntField(null=True)
+    height   = IntField(null=True)
+```
+
+## Configuration
+
+Storage can also be configured from a config file or environment:
+
+```toml
+# ryx.toml
+[storage]
+backend = "local"
+root = "media/"
+base_url = "/media/"
+```
+
+| Env var | Description |
+|---|---|
+| `RYX_STORAGE_BACKEND` | `"local"` or `"memory"` |
+| `RYX_STORAGE_ROOT` | Local root directory |
+| `RYX_STORAGE_BASE_URL` | Public URL prefix |
+
+## Backend Support
+
+File fields store a text path — they work on all backends (PostgreSQL, MySQL, SQLite) with no schema changes.
+
+## Limitations
+
+- `QuerySet.update(...)` bypasses `to_db()` — do **not** assign new file content via `.update()`. Use instance assignment + `save()`.
+- `QuerySet.delete()` / `bulk_delete` have no model instances, so stored files are **not** cleaned automatically (documented best-effort).
+
+## Next Steps
+
+- **[Field Reference](/reference/field-reference)** — All field types
+- **[Migrations](/core-concepts/migrations)** — Schema management
