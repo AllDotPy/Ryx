@@ -4,11 +4,14 @@ Ryx ORM — Field Classes
 
 from __future__ import annotations
 
+import os
 import uuid
 import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, List, Optional, Sequence, Type
+
+from ryx.files import FieldFile
 
 from ryx.validators import (
     ChoicesValidator,
@@ -177,7 +180,13 @@ class Field:
     def __get__(self, obj: Optional["Model"], objtype: Optional[type] = None) -> Any:
         if obj is None:
             return self
-        return obj.__dict__.get(self.attname, self.get_default())
+        value = obj.__dict__.get(self.attname, None)
+        # Primary keys must not expose a default before they are set — a
+        # callable default (e.g. UUID auto_create) would otherwise make
+        # ``self.pk`` non-None on unsaved instances and break the INSERT path.
+        if value is None and not self.primary_key:
+            return self.get_default()
+        return value
 
     def __set__(self, obj: "Model", value: Any) -> None:
         obj.__dict__[self.attname] = self.to_python(value)
@@ -244,6 +253,21 @@ class Field:
         """
         self.validate(value)
         return value
+
+    # Lifecycle hooks (no-ops by default — subclasses like FileField override)
+    async def before_save(self, instance: "Model", created: bool) -> None:
+        """Field-level hook invoked before the model is written.
+
+        No-op by default. ``FileField`` uses this to commit staged files.
+        """
+        return None
+
+    async def after_delete(self, instance: "Model") -> None:
+        """Field-level hook invoked after the model row is deleted.
+
+        No-op by default. ``FileField`` uses this to delete stored files.
+        """
+        return None
 
     def deconstruct(self) -> dict:
         """Return a dict representation for migration serialization."""
@@ -337,7 +361,7 @@ class IntField(Field):
         self.min_value = min_value
         self.max_value = max_value
 
-    def db_type(self) -> str: 
+    def db_type(self) -> str:
         return "INTEGER"
     
     def to_python(self, v): 
@@ -730,10 +754,12 @@ class DateTimeField(Field):
         super().__init__(**kw)
 
     def db_type(self) -> str:
-        return "TIMESTAMP"
+        # Stored as TEXT so the sqlx "any" driver (no native timestamp support)
+        # round-trips the ISO string losslessly across PostgreSQL/SQLite/MySQL.
+        return "VARCHAR(32)"
 
     def to_python(self, v):
-        if v is None:
+        if v is None or v == "":
             return None
         if isinstance(v, datetime):
             return v
@@ -932,6 +958,227 @@ class VectorField(Field):
 
 
 ####
+###     FILE FIELD
+#####
+class FileField(Field):
+    """A file stored via a pluggable :class:`~ryx.storage.Storage` backend.
+
+    The database stores only the file's name/path (``VARCHAR``); the bytes
+    live in the storage backend (local filesystem by default).
+
+    Args:
+        upload_to: Directory prefix (``str``) or callable
+                   ``(instance, filename) -> str`` applied to the stored name.
+        storage:   A custom storage backend. Defaults to the global storage
+                   configured with :func:`ryx.configure_storage`.
+        max_length: Column length for the stored name. Default: 255.
+
+    Assignment accepts:
+        - ``None`` / ``""``            — clear the file
+        - ``str`` / ``os.PathLike``    — an already-stored name
+        - ``bytes``                    — raw content (staged, committed on save)
+        - a file-like object (``.read()``) — content (staged)
+        - a :class:`~ryx.files.FieldFile`
+
+    Example::
+
+        class User(Model):
+            avatar = FileField(upload_to="avatars/")
+
+        user = User(avatar=b"...")
+        await user.save()          # bytes written to storage
+        print(user.avatar.url)
+    """
+
+    SUPPORTED_LOOKUPS = ["exact", "isnull", "in"]
+
+    def __init__(
+        self,
+        *,
+        upload_to: Any = "",
+        storage: Any = None,
+        max_length: int = 255,
+        **kw,
+    ) -> None:
+        self.upload_to = upload_to
+        self.storage = storage
+        self.max_length = max_length
+        super().__init__(**kw)
+
+    def db_type(self) -> str:
+        return f"VARCHAR({self.max_length})"
+
+    # Descriptor: wrap the stored name in a FieldFile bound to the instance
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return self
+        value = obj.__dict__.get(self.attname, None)
+        if value is None:
+            return None
+        if isinstance(value, FieldFile):
+            return value
+        ff = FieldFile(obj, self, value)
+        obj.__dict__[self.attname] = ff
+        return ff
+
+    def __set__(self, obj, value):
+        if value is None or value == "":
+            obj.__dict__[self.attname] = None
+            return
+        if isinstance(value, FieldFile):
+            value.instance = obj
+            value.field = self
+            obj.__dict__[self.attname] = value
+            return
+        if isinstance(value, (str, os.PathLike)):
+            obj.__dict__[self.attname] = FieldFile(obj, self, str(value))
+            return
+
+        # Raw content: bytes or a file-like object → stage for commit on save.
+        content: Optional[bytes]
+        name: Optional[str] = None
+        if hasattr(value, "read"):
+            name = getattr(value, "name", None)
+            content = value.read()
+        elif isinstance(value, (bytes, bytearray)):
+            content = bytes(value)
+        else:
+            raise TypeError(
+                f"FileField '{self.attname}' expected None, str, bytes, or a "
+                f"file-like object, got {type(value).__name__}"
+            )
+
+        filename = os.path.basename(name) if name else f"file_{uuid.uuid4().hex[:7]}"
+        generated = self.generate_filename(obj, filename)
+        ff = FieldFile(obj, self, name=None)
+        ff._committed = False
+        ff._pending = (generated, content or b"")
+        obj.__dict__[self.attname] = ff
+
+    def generate_filename(self, instance, filename: str) -> str:
+        """Apply ``upload_to`` to ``filename`` and return a relative path."""
+        if callable(self.upload_to):
+            prefix = self.upload_to(instance, filename) or ""
+        else:
+            prefix = self.upload_to or ""
+        filename = os.path.basename(filename)
+        if prefix:
+            return f"{str(prefix).strip('/')}/{filename}"
+        return filename
+
+    def to_python(self, value: Any) -> Any:
+        # Raw DB value → FieldFile wrapping (instance bound lazily in __get__).
+        if value is None or isinstance(value, FieldFile):
+            return value
+        return FieldFile(None, self, str(value))
+
+    def to_db(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, FieldFile):
+            return value.name
+        return str(value)
+
+    def _build_implicit_validators(self) -> None:
+        # No NotNull/NotBlank validators — emptiness is handled by null/blank.
+        pass
+
+    async def before_save(self, instance: "Model", created: bool) -> None:
+        """Commit any staged file content to storage before the SQL write."""
+        ff = instance.__dict__.get(self.attname)
+        if isinstance(ff, FieldFile) and ff._pending is not None:
+            await ff._commit()
+
+    async def after_delete(self, instance: "Model") -> None:
+        """Delete the stored file after the row is deleted (best-effort)."""
+        ff = instance.__dict__.get(self.attname)
+        if isinstance(ff, FieldFile) and ff.name:
+            try:
+                await ff.storage.delete(ff.name)
+            except Exception as e:  # pragma: no cover - best effort
+                import logging
+
+                logging.getLogger("ryx.fields").warning(
+                    "Could not delete file %s: %s", ff.name, e
+                )
+
+
+####
+###     IMAGE FIELD
+#####
+class ImageField(FileField):
+    """A ``FileField`` specialised for images.
+
+    Validation uses Pillow if installed (``pip install ryx[images]``) to verify
+    the file is a valid image and to expose :attr:`width` / :attr:`height`.
+    Without Pillow, a lightweight magic-bytes check is used.
+
+    Args:
+        width_field:  Optional model field name to store the image width.
+        height_field: Optional model field name to store the image height.
+    """
+
+    def __init__(self, *, width_field: Optional[str] = None, height_field: Optional[str] = None, **kw):
+        self.width_field = width_field
+        self.height_field = height_field
+        super().__init__(**kw)
+
+    async def before_save(self, instance: "Model", created: bool) -> None:
+        ff = instance.__dict__.get(self.attname)
+        if isinstance(ff, FieldFile) and ff._pending is not None:
+            content = ff._pending[1]
+            _validate_image_bytes(content)
+            dims = _image_dimensions(content)
+            if dims is not None:
+                w, h = dims
+                if self.width_field:
+                    setattr(instance, self.width_field, w)
+                if self.height_field:
+                    setattr(instance, self.height_field, h)
+        await super().before_save(instance, created)
+
+    @property
+    def width(self) -> Optional[int]:
+        return None
+
+    @property
+    def height(self) -> Optional[int]:
+        return None
+
+
+_IMAGE_MAGIC: list[tuple[bytes, str]] = [
+    (b"\x89PNG\r\n\x1a\n", "png"),
+    (b"\xff\xd8\xff", "jpeg"),
+    (b"GIF87a", "gif"),
+    (b"GIF89a", "gif"),
+    (b"RIFF", "webp"),  # WEBP starts with RIFF....WEBP
+]
+
+
+def _validate_image_bytes(content: bytes) -> None:
+    """Raise ``ValueError`` if ``content`` is not a recognised image."""
+    if not content:
+        raise ValueError("Image file is empty")
+    for magic, _ in _IMAGE_MAGIC:
+        if content.startswith(magic):
+            return
+    raise ValueError("Uploaded file is not a valid image (unrecognised format)")
+
+
+def _image_dimensions(content: bytes) -> Optional[tuple[int, int]]:
+    """Return ``(width, height)`` using Pillow if available, else ``None``."""
+    try:
+        import io
+
+        from PIL import Image  # type: ignore
+
+        with Image.open(io.BytesIO(content)) as img:
+            return img.size
+    except Exception:
+        return None
+
+
+####
 ###     FOREIGN KEY FIELD
 #####
 class ForeignKey(Field):
@@ -975,10 +1222,22 @@ class ForeignKey(Field):
         _pending_reverse_fk.append((self.to, rel_name, model, self.attname))
 
     def db_type(self) -> str:
+        # Inherit the referenced model's primary-key type so a ForeignKey to a
+        # UUID (or other) primary key creates a matching column, not INTEGER.
+        target = self.to
+        if isinstance(target, str):
+            from ryx.relations import _resolve_model
+
+            target = _resolve_model(target)
+        if target is not None and getattr(target, "_meta", None) is not None:
+            pk_field = target._meta.pk_field
+            if pk_field is not None:
+                return pk_field.db_type()
         return "INTEGER"
 
     def to_python(self, v):
-        return None if v is None else int(v)
+        # 0 is the SQLite decode of a NULL FK (auto-increment pks start at 1).
+        return None if v is None or v == 0 or v == "" else int(v)
 
 
 ####

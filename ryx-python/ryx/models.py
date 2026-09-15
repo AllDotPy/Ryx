@@ -118,6 +118,7 @@ class Options:
 
         self.app_label: str = getattr(meta_class, "app_label", "")
         self.database: Optional[str] = getattr(meta_class, "database", None)
+        self.schema: str = getattr(meta_class, "schema", "") or ""
         self.ordering: List[str] = list(getattr(meta_class, "ordering", []))
 
         self.unique_together: List[tuple] = list(
@@ -163,9 +164,10 @@ class Options:
 class Manager:
     """Default query manager. Proxies to QuerySet."""
 
-    def __init__(self, alias: Optional[str] = None) -> None:
+    def __init__(self, alias: Optional[str] = None, schema: Optional[str] = None) -> None:
         self._model: Optional[type[Model]] = None
         self._alias = alias
+        self._schema = schema
 
     def contribute_to_class(self, model: type, name: str) -> None:
         self._model = model
@@ -173,7 +175,10 @@ class Manager:
     def get_queryset(self):
         from ryx.queryset import QuerySet
 
-        return QuerySet(self._model, _using=self._alias)
+        qs = QuerySet(self._model, _using=self._alias)
+        if self._schema:
+            qs = qs.schema(self._schema)
+        return qs
 
     # Proxy shortcuts
     def all(self):
@@ -199,6 +204,22 @@ class Manager:
         new_mgr = Manager()
         new_mgr._model = self._model
         new_mgr._alias = alias
+        new_mgr._schema = self._schema
+        return new_mgr
+
+    def schema(self, schema: str) -> "Manager":
+        """Return a new Manager bound to the specified PostgreSQL schema.
+
+        All reads and writes through this manager are scoped to ``schema``::
+
+            tenant1 = Tenant.objects.schema("tenant1")
+            await tenant1.create(...)   # INSERT INTO "tenant1"."tenants"
+            await tenant1.filter(...)   # SELECT ... FROM "tenant1"."tenants"
+        """
+        new_mgr = Manager()
+        new_mgr._model = self._model
+        new_mgr._alias = self._alias
+        new_mgr._schema = schema
         return new_mgr
 
     def cache(self, **kw):
@@ -244,6 +265,8 @@ class Manager:
         """Create and save a new model instance."""
         logger.debug("Manager.create(%s): %s", self._model.__name__, kw)
         instance = self._model(**kw)
+        if self._schema:
+            instance._schema = self._schema
 
         # Use the manager's alias if specified
         from ryx.router import get_router
@@ -481,8 +504,14 @@ class Model(metaclass=ModelMetaclass):
     objects: Manager
 
     def __init__(self, **kwargs: Any) -> None:
-        # Set field defaults first
+        # The schema this instance is bound to (None → resolve from _meta).
+        self._schema: Optional[str] = None
+
+        # Set field defaults first (skip the primary key — its callable default
+        # is generated at INSERT time so ``pk`` stays None on unsaved instances).
         for field in self._meta.fields.values():
+            if field.primary_key:
+                continue
             object.__setattr__(self, field.attname, field.get_default())
 
         # Apply user-provided values
@@ -507,6 +536,7 @@ class Model(metaclass=ModelMetaclass):
         """Build a model instance from a raw decoded DB row (no validation)."""
 
         instance = cls.__new__(cls)
+        instance._schema = None
         for field in cls._meta.fields.values():
             object.__setattr__(instance, field.attname, field.get_default())
 
@@ -523,6 +553,11 @@ class Model(metaclass=ModelMetaclass):
         if self._meta.pk_field:
             return getattr(self, self._meta.pk_field.attname, None)
         return None
+
+    # Schema resolution (PostgreSQL multi-schema)
+    def _resolve_schema(self) -> str:
+        """Return the effective PostgreSQL schema for this instance."""
+        return self._schema or self._meta.schema or ""
 
     # Hooks (no-ops by default — override in subclass)
     async def clean(self) -> None:
@@ -595,6 +630,13 @@ class Model(metaclass=ModelMetaclass):
         # pre_save signal
         await pre_save.send(sender=type(self), instance=self, created=created)
 
+        # Field-level before_save hooks (e.g. FileField commits staged files).
+        # Runs before values are built so to_db() sees the committed name.
+        for _field in self._meta.fields.values():
+            _hook = getattr(_field, "before_save", None)
+            if _hook is not None:
+                await _hook(self, created)
+
         # Resolve database alias: using -> Router.db_for_write -> Meta.database -> 'default'
         from ryx.router import get_router
 
@@ -606,28 +648,51 @@ class Model(metaclass=ModelMetaclass):
             if not alias:
                 alias = self._meta.database
 
+        # Resolve PostgreSQL schema (instance bound schema -> Meta.schema)
+        schema = self._resolve_schema()
+
         # SQL execution
         # Creation
         if created:
+            pk_field = self._meta.pk_field
+            # Apply a client-generated primary key (e.g. UUID auto_create) and
+            # include it in the INSERT. Auto-increment PKs stay DB-generated.
+            if pk_field is not None and self.pk is None and pk_field.has_default():
+                object.__setattr__(self, pk_field.attname, pk_field.get_default())
+
+            # When the PK was supplied by the client, there is nothing to
+            # RETURN from the database — skip returning_id and the overwrite.
+            client_generated_pk = (
+                pk_field is not None
+                and getattr(self, pk_field.attname, None) is not None
+            )
+
             fields_to_save = [
                 f
                 for f in self._meta.fields.values()
-                if not f.primary_key
-                and (f.editable or getattr(f, "auto_now_add", False))
+                if (f.primary_key and getattr(self, f.attname, None) is not None)
+                or (
+                    not f.primary_key
+                    and (f.editable or getattr(f, "auto_now_add", False))
+                )
             ]
             values = [
                 (f.column, f.to_db(getattr(self, f.attname))) for f in fields_to_save
             ]
-            
+
             builder = _core.QueryBuilder(self._meta.table_name)
             if alias:
                 builder = builder.set_using(alias)
-            new_id = await builder.execute_insert(values, returning_id=True)
+            if schema:
+                builder = builder.set_schema(schema)
+            new_id = await builder.execute_insert(
+                values, returning_id=not client_generated_pk
+            )
             logger.debug(
                 "INSERT %s (pk=%s) on %s",
                 type(self).__name__, new_id, alias or "default",
             )
-            if self._meta.pk_field:
+            if self._meta.pk_field and not client_generated_pk:
                 object.__setattr__(self, self._meta.pk_field.attname, new_id)
 
         # Update
@@ -652,6 +717,8 @@ class Model(metaclass=ModelMetaclass):
             builder = _core.QueryBuilder(self._meta.table_name)
             if alias:
                 builder = builder.set_using(alias)
+            if schema:
+                builder = builder.set_schema(schema)
             builder = builder.add_filter(
                 pk_field.column, "exact", self.pk, negated=False
             )
@@ -698,12 +765,21 @@ class Model(metaclass=ModelMetaclass):
         builder = _core.QueryBuilder(self._meta.table_name)
         if alias:
             builder = builder.set_using(alias)
+        schema = self._resolve_schema()
+        if schema:
+            builder = builder.set_schema(schema)
         builder = builder.add_filter(pk_field.column, "exact", self.pk, negated=False)
         await builder.execute_delete()
         logger.debug(
             "DELETE %s (pk=%s) on %s",
             type(self).__name__, self.pk, alias or "default",
         )
+
+        # Field-level after_delete hooks (e.g. FileField removes stored files).
+        for _field in self._meta.fields.values():
+            _hook = getattr(_field, "after_delete", None)
+            if _hook is not None:
+                await _hook(self)
 
         # Clear pk to signal "no longer in DB"
         object.__setattr__(self, self._meta.pk_field.attname, None)

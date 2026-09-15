@@ -38,8 +38,10 @@ from ryx.fields import (
     DecimalField,
     DurationField,
     EmailField,
+    FileField,
     FloatField,
     ForeignKey,
+    ImageField,
     IntField,
     IPAddressField,
     JSONField,
@@ -56,6 +58,7 @@ from ryx.fields import (
     UUIDField,
     VectorField,
 )
+from ryx.files import FieldFile
 from ryx.queryset import (
     Avg,
     Count,
@@ -116,6 +119,15 @@ from ryx.cache import (
     invalidate_model,
     invalidate_all,
     get_cache,
+)
+from ryx import storage as storage_module
+from ryx.storage import (
+    Storage,
+    FileSystemStorage,
+    InMemoryStorage,
+    configure_storage,
+    get_storage,
+    default_storage,
 )
 from ryx.migrations.ddl import DDLGenerator, generate_schema_ddl, detect_backend
 from ryx.migrations.autodetect import Autodetector
@@ -253,6 +265,9 @@ __all__ = [
     "URLField",
     "UUIDField",
     "VectorField",
+    "FileField",
+    "ImageField",
+    "FieldFile",
     # QuerySet
     "QuerySet",
     "Q",
@@ -323,6 +338,13 @@ __all__ = [
     "invalidate_model",
     "invalidate_all",
     "get_cache",
+    # Storage
+    "Storage",
+    "FileSystemStorage",
+    "InMemoryStorage",
+    "configure_storage",
+    "get_storage",
+    "default_storage",
     # Migrations
     "DDLGenerator",
     "generate_schema_ddl",
@@ -369,6 +391,31 @@ def _discover_config_file():
         return {}
 
 
+def _apply_storage_config(cfg: dict) -> None:
+    """Configure the global storage backend from a ``[storage]`` config block.
+
+    Recognised keys: ``backend`` (``"local"``/``"memory"``), ``root``,
+    ``base_url``. Env vars ``RYX_STORAGE_ROOT`` / ``RYX_STORAGE_BASE_URL``
+    act as fallbacks via ``get_storage()``.
+    """
+    block = (cfg or {}).get("storage") or {}
+    if not block:
+        return
+    try:
+        backend = str(block.get("backend", "local")).lower()
+        if backend in ("memory", "inmemory", "in_memory"):
+            configure_storage(storage_module.InMemoryStorage(
+                base_url=block.get("base_url", "/media/"),
+            ))
+        else:
+            configure_storage(storage_module.FileSystemStorage(
+                root=block.get("root", os.getenv("RYX_STORAGE_ROOT", "media")),
+                base_url=block.get("base_url", os.getenv("RYX_STORAGE_BASE_URL", "/media/")),
+            ))
+    except Exception as e:  # pragma: no cover - best effort
+        _ryx_logger.warning("Could not configure storage: %s", e)
+
+
 def _auto_setup():
     global _AUTO_INIT_DONE
     if _AUTO_INIT_DONE:
@@ -383,6 +430,7 @@ def _auto_setup():
     if cfg:
         urls.update(cfg.get("urls", {}) or {})
         pool_cfg = cfg.get("pool", {}) or {}
+        _apply_storage_config(cfg)
 
     if not urls:
         _ryx_logger.debug("No URLs found — auto-init skipped")
