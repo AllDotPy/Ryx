@@ -55,6 +55,7 @@ impl<T: Model + FromRow> ObjectsManager<T> {
 
 pub struct InsertBuilder<T> {
     values: Vec<(String, SqlValue)>,
+    schema: String,
     _marker: PhantomData<T>,
 }
 
@@ -62,6 +63,7 @@ impl<T: Model + FromRow> InsertBuilder<T> {
     pub fn new() -> Self {
         Self {
             values: Vec::new(),
+            schema: String::new(),
             _marker: PhantomData,
         }
     }
@@ -72,12 +74,26 @@ impl<T: Model + FromRow> InsertBuilder<T> {
         self
     }
 
+    /// Set the PostgreSQL schema for the INSERT (multi-schema support).
+    ///
+    /// ```ignore
+    /// Item::objects().create().schema("tenant1")
+    ///     .set("name", "x").save().await?;
+    /// ```
+    pub fn schema(mut self, schema: &str) -> Self {
+        self.schema = schema.to_string();
+        self
+    }
+
     pub async fn save(self) -> RyxResult<T> {
         let table = T::table_name();
         let backend = ryx_backend::pool::get_backend(None)
             .unwrap_or(ryx_query::Backend::PostgreSQL);
         let mut node = QueryNode::select(table);
         node.backend = backend;
+        if !self.schema.is_empty() {
+            node = node.with_schema(self.schema.as_str());
+        }
         node.operation = QueryOperation::Insert {
             values: self
                 .values
