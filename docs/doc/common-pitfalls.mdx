@@ -1,0 +1,47 @@
+# Common Pitfalls
+
+This guide covers common mistakes new Ryx users make and how to fix them.
+
+## 1. Using `select_related` when you need `prefetch_related`
+
+**Problem:** Using `select_related` for many-to-many or reverse foreign key relationships causes errors.
+
+**Solution:** Use `prefetch_related` for many-to-many and reverse foreign key relationships. Use `select_related` only for forward foreign key and one-to-one relationships.
+
+```python
+# Wrong
+users = await User.objects.select_related("posts").all()
+
+# Correct
+users = await User.objects.prefetch_related("posts").all()
+```
+
+## 2. Forgetting to use async context managers
+
+**Problem:** Opening database connections without async context managers causes connection leaks.
+
+**Solution:** Always use `async with` when working with database connections.
+
+```python
+# Wrong
+db = Database()
+await db.connect()
+
+# Correct
+async with Database() as db:
+    await db.query(...)
+```
+
+## 3. Not awaiting async queries
+
+**Problem:** Forgetting `await` on async queries returns a coroutine object instead of results.
+
+**Solution:** Always use `await` with Ryx query methods.
+
+```python
+# Wrong
+users = User.objects.all()
+
+# Correct
+users = await User.objects.all()
+```
