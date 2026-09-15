@@ -462,8 +462,9 @@ class MigrationRunner:
                 f"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE'",
                 alias=alias,
             )
-            if rows:
-                return [r.get("table_name", "") for r in rows]
+            # Return even when empty: a successful information_schema query means
+            # this is a Postgres/MySQL backend, so never fall back to SQLite.
+            return [r.get("table_name", "") for r in rows]
         except Exception:
             pass
 
@@ -493,17 +494,19 @@ class MigrationRunner:
                 f"ORDER BY ordinal_position",
                 alias=alias,
             )
-            if rows:
-                for row in rows:
-                    cols.append(
-                        ColumnState(
-                            name=row.get("column_name", "?"),
-                            db_type=(row.get("data_type") or "TEXT").upper(),
-                            nullable=row.get("is_nullable", "YES") == "YES",
-                            default=row.get("column_default"),
-                        )
+            # A successful information_schema query means this is a Postgres/MySQL
+            # backend — never fall back to SQLite PRAGMA (which would abort an
+            # open transaction on PostgreSQL).
+            for row in rows:
+                cols.append(
+                    ColumnState(
+                        name=row.get("column_name", "?"),
+                        db_type=(row.get("data_type") or "TEXT").upper(),
+                        nullable=row.get("is_nullable", "YES") == "YES",
+                        default=row.get("column_default"),
                     )
-                return cols
+                )
+            return cols
         except Exception:
             pass
 

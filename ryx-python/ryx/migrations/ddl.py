@@ -21,7 +21,7 @@ Usage:
 """
 from __future__ import annotations
 
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ryx.migrations.state import ColumnState, TableState
@@ -156,7 +156,7 @@ class DDLGenerator:
             return (
                 f"ALTER TABLE {self._qn(table_name)} "
                 f"ALTER COLUMN {self._q(col.name)} TYPE {db_type}, "
-                f"{f'ALTER COLUMN {self._q(col.name)} SET DEFAULT {self._q(col.default)},' if col.default is not None else ''}"
+                f"{f'ALTER COLUMN {self._q(col.name)} SET DEFAULT {self._render_default(col.default)},' if col.default is not None else ''}"
                 f"ALTER COLUMN {self._q(col.name)} {null_clause};"
             )
         
@@ -270,6 +270,14 @@ class DDLGenerator:
         )
 
     # Internal: column definition
+    def _render_default(self, default: Any) -> str:
+        """Render a Python default value as a backend-correct SQL literal."""
+        if isinstance(default, bool):
+            return "1" if default and self.backend == "sqlite" else ("TRUE" if default else "FALSE")
+        if isinstance(default, str):
+            return f"'{default.replace(chr(39), chr(39) * 2)}'"
+        return str(default)
+
     def _column_def(self, col: "ColumnState") -> str:
         """Return the SQL column definition fragment for a single ColumnState.
 
@@ -291,7 +299,7 @@ class DDLGenerator:
             if col.unique and not col.primary_key:
                 parts.append("UNIQUE")
             if col.default is not None:
-                parts.append(f"DEFAULT {col.default}")
+                parts.append(f"DEFAULT {self._render_default(col.default)}")
             
         return " ".join(parts)
 

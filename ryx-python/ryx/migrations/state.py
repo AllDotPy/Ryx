@@ -304,13 +304,16 @@ def project_state_from_models(models: list) -> SchemaState:
         schema = getattr(model._meta, "schema", "")
         table = TableState(name=model._meta.table_name, schema=schema)
         for field_name, f in model._meta.fields.items():
+            # Callable defaults (e.g. UUID auto_create) are applied at INSERT
+            # time in Python, not as a SQL DEFAULT expression.
+            default = None if callable(f.default) else f.get_default()
             col = ColumnState(
                 name = f.column,
                 db_type = f.db_type(),
                 nullable = f.null,
                 primary_key = f.primary_key,
                 unique = f.unique or f.primary_key,
-                default = f.get_default(),
+                default = default,
             )
             table.add_column(col)
         state.add_table(table)
