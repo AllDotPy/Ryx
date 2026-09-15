@@ -218,6 +218,7 @@ async fn test_config_init_pool() {
             ..Default::default()
         },
         migrations: ryx_rs::config::MigrationsConfig::default(),
+        storage: ryx_rs::config::StorageConfig::default(),
     };
 
     config.init_pool().await.expect("init pool from config");
@@ -260,4 +261,58 @@ fn test_config_empty_dir() {
             unsafe { std::env::set_var(k, val) };
         }
     }
+}
+
+/// Test that `[storage]` env overrides populate `StorageConfig` fields.
+#[test]
+fn test_config_storage_env_overrides() {
+    let _lock = ENV_LOCK.lock().unwrap();
+    let vars: Vec<(&str, Option<String>)> = [
+        "RYX_STORAGE_BACKEND",
+        "RYX_STORAGE_ROOT",
+        "RYX_STORAGE_BASE_URL",
+    ]
+    .iter()
+    .map(|k| (*k, std::env::var(k).ok()))
+    .collect();
+
+    unsafe {
+        std::env::set_var("RYX_STORAGE_BACKEND", "local");
+        std::env::set_var("RYX_STORAGE_ROOT", "media2/");
+        std::env::set_var("RYX_STORAGE_BASE_URL", "/static/");
+    }
+
+    let config = ryx_rs::RyxConfig::default();
+    let mut cfg = ryx_rs::RyxConfig {
+        urls: Default::default(),
+        pool: ryx_rs::config::PoolConfigSection::default(),
+        migrations: ryx_rs::config::MigrationsConfig::default(),
+        storage: config.storage,
+    };
+    cfg.apply_env_overrides();
+    assert_eq!(cfg.storage.backend.as_deref(), Some("local"));
+    assert_eq!(cfg.storage.root.as_deref(), Some("media2/"));
+    assert_eq!(cfg.storage.base_url.as_deref(), Some("/static/"));
+
+    for (k, v) in &vars {
+        match v {
+            Some(val) => unsafe { std::env::set_var(k, val) },
+            None => unsafe { std::env::remove_var(k) },
+        }
+    }
+}
+
+/// Test `StorageConfig::configure()` registers the global storage backend.
+#[test]
+fn test_config_storage_configure() {
+    ryx_rs::clear_storage();
+    let cfg = ryx_rs::config::StorageConfig {
+        backend: Some("memory".into()),
+        root: None,
+        base_url: Some("/m/".into()),
+    };
+    cfg.configure();
+    let storage = ryx_rs::get_storage().expect("storage configured");
+    assert_eq!(storage.url("x.txt"), "/m/x.txt");
+    ryx_rs::clear_storage();
 }
