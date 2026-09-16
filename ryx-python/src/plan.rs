@@ -145,6 +145,13 @@ pub fn build_plan<'py>(
                     on_right,
                 });
             }
+            "extra_alias" => {
+                let payload = tuple.get_item(1)?;
+                let t = payload.cast::<PyTuple>()?;
+                let col: String = t.get_item(0)?.extract()?;
+                let alias: String = t.get_item(1)?.extract()?;
+                node = node.with_extra_alias(col, alias);
+            }
             "order_by" => {
                 let payload = tuple.get_item(1)?;
                 let list = payload.cast::<PyList>()?;

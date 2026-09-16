@@ -18,11 +18,8 @@ for post in posts:
 ## The Solution
 
 ```python
-from ryx.relations import apply_select_related
-
 # Single query with JOIN
-posts = await Post.objects.filter(active=True)
-posts = await apply_select_related(posts, fields=["author"])
+posts = await Post.objects.select_related("author").filter(active=True)
 
 for post in posts:
     print(post.author.name)  # No extra queries
@@ -30,25 +27,25 @@ for post in posts:
 
 ## How It Works
 
-`select_related` reconstructs the query with `LEFT JOIN`:
+`select_related` reconstructs the query with `LEFT OUTER JOIN`:
 
 ```sql
 -- Without select_related
 SELECT * FROM "posts" WHERE "active" = ?
 
--- With select_related(["author"])
-SELECT "posts".*, "authors".* FROM "posts"
-LEFT JOIN "authors" ON "posts"."author_id" = "authors"."id"
+-- With select_related("author")
+SELECT "posts"."id", "posts"."title", "posts"."author_id", "author"."id" AS "author__id", "author"."name" AS "author__name"
+FROM "posts"
+LEFT OUTER JOIN "authors" AS "author" ON "posts"."author_id" = "author"."id"
 WHERE "posts"."active" = ?
 ```
 
-The Rust executor decodes the joined rows and reconstructs full model instances with related objects attached.
+The shared compiler handles qualified column selection and alias generation, and the ORM reconstructs model instances with related objects attached.
 
 ## Multiple Relations
 
 ```python
-posts = await Post.objects.filter(active=True)
-posts = await apply_select_related(posts, fields=["author", "category"])
+posts = await Post.objects.select_related("author", "category").filter(active=True)
 ```
 
 ## When to Use select_related

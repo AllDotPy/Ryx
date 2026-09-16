@@ -258,6 +258,7 @@ class QuerySet:
         _annotations: Optional[List[dict]] = None,
         _group_by: Optional[List[str]] = None,
         _using: Optional[str] = None,
+        _select_related: Optional[List[str]] = None,
         _schema: Optional[str] = None,
     ) -> None:
 
@@ -267,6 +268,9 @@ class QuerySet:
         self._annotations = _annotations or []
         self._group_by = _group_by or []
         self._using = _using
+        self._select_related: List[str] = (
+            list(_select_related) if _select_related else []
+        )
         self._schema = _schema
 
     def _clone(self, **overrides) -> "QuerySet":
@@ -277,6 +281,9 @@ class QuerySet:
             _annotations=overrides.get("_annotations", list(self._annotations)),
             _group_by=overrides.get("_group_by", list(self._group_by)),
             _using=overrides.get("_using", self._using),
+            _select_related=overrides.get(
+                "_select_related", list(self._select_related)
+            ),
             _schema=overrides.get("_schema", self._schema),
         )
 
@@ -285,12 +292,110 @@ class QuerySet:
         new_ops.append((tag, payload))
         return self._clone(_ops=new_ops)
 
-    def _materialize_builder(self, alias: Optional[str]) -> _core.QueryBuilder:
+    def _materialize_builder(
+        self, alias: Optional[str], ignore_select_related: bool = False
+    ) -> _core.QueryBuilder:
         ops = list(self._ops)
         if alias:
             ops.append(("using", alias))
-        if self._select_columns:
-            ops.append(("select_cols", list(self._select_columns)))
+
+        if self._select_related and not ignore_select_related:
+            main_table = self._model._meta.table_name
+            if self._select_columns:
+                select_cols = list(self._select_columns)
+            else:
+                select_cols = [
+                    f"{main_table}.{f.column}"
+                    for f in self._model._meta.fields.values()
+                ]
+            ops.append(("select_cols", select_cols))
+
+            from ryx.fields import ForeignKey, OneToOneField
+            from ryx.relations import _resolve_model
+
+            for rel_str in self._select_related:
+                if rel_str in self._model._meta.fields:
+                    field = self._model._meta.fields[rel_str]
+                elif f"{rel_str}_id" in self._model._meta.fields:
+                    field = self._model._meta.fields[f"{rel_str}_id"]
+                else:
+                    raise ValueError(
+                        f"{self._model.__name__} has no field '{rel_str}'. "
+                        f"Available fields: {list(self._model._meta.fields.keys())}"
+                    )
+
+                if not isinstance(field, (ForeignKey, OneToOneField)):
+                    raise TypeError(
+                        f"select_related only works with ForeignKey/OneToOneField. "
+                        f"'{rel_str}' is {type(field).__name__}."
+                    )
+
+                rel_name = rel_str.removesuffix("_id")
+                related_model = _resolve_model(field.to, self._model)
+                related_table = related_model._meta.table_name
+                pk_col = (
+                    related_model._meta.pk_field.column
+                    if related_model._meta.pk_field
+                    else "id"
+                )
+
+                ops.append(
+                    (
+                        "join",
+                        (
+                            "LEFT OUTER",
+                            related_table,
+                            rel_name,
+                            f"{main_table}.{field.column}",
+                            f"{rel_name}.{pk_col}",
+                        ),
+                    )
+                )
+
+                for rel_field in related_model._meta.fields.values():
+                    ops.append(
+                        (
+                            "extra_alias",
+                            (
+                                f"{rel_name}.{rel_field.column}",
+                                f"{rel_name}__{rel_field.column}",
+                            ),
+                        )
+                    )
+            # Qualify any unqualified order_by fields with main_table to avoid ambiguity with JOINs
+            new_ops = []
+            for op_tag, op_val in ops:
+                if op_tag == "order_by":
+                    if isinstance(op_val, list):
+                        new_fields = []
+                        for term in op_val:
+                            prefix = ""
+                            if term.startswith("-"):
+                                prefix = "-"
+                                clean_term = term[1:]
+                            else:
+                                clean_term = term
+                            if "." not in clean_term:
+                                new_fields.append(f"{prefix}{main_table}.{clean_term}")
+                            else:
+                                new_fields.append(term)
+                        op_val = new_fields
+                    elif isinstance(op_val, str):
+                        term = op_val
+                        prefix = ""
+                        if term.startswith("-"):
+                            prefix = "-"
+                            clean_term = term[1:]
+                        else:
+                            clean_term = term
+                        if "." not in clean_term:
+                            op_val = f"{prefix}{main_table}.{clean_term}"
+                new_ops.append((op_tag, op_val))
+            ops = new_ops
+        else:
+            if self._select_columns:
+                ops.append(("select_cols", list(self._select_columns)))
+
         if self._group_by:
             ops.append(("group_by", list(self._group_by)))
         return _core.build_plan(self._model._meta.table_name, ops)
@@ -503,12 +608,21 @@ class QuerySet:
         )
 
     def select_related(self, *fields: str) -> "QuerySet":
-        """Stub for eager loading of related objects (planned feature).
+        """Eagerly load related objects via LEFT OUTER JOIN."""
+        if not fields:
+            return self._clone()
 
-        Currently a no-op — returns self unchanged.
-        """
-        # TODO: implement via LEFT JOIN + row reconstruction
-        return self._clone()
+        new_select_related = list(self._select_related)
+        for field_name in fields:
+            if "__" in field_name:
+                raise ValueError(
+                    f"Nested select_related is not supported ('{field_name}'). "
+                    "Only single-level relationships are supported."
+                )
+            if field_name not in new_select_related:
+                new_select_related.append(field_name)
+
+        return self._clone(_select_related=new_select_related)
 
     # Ordering / paging
     def order_by(self, *fields: str) -> "QuerySet":
@@ -738,6 +852,7 @@ class QuerySet:
             _group_by=list(self._group_by),
             _ops=list(self._ops),
             _using=self._using,
+            _select_related=list(self._select_related),
         )
         clone._cache_ttl = ttl
         clone._cache_key = key
@@ -777,26 +892,73 @@ class QuerySet:
         # 4. Fallback
         return "default"
 
+    def _reconstruct_row(self, row: dict) -> "Model":
+        if not self._select_related:
+            instance = self._model._from_row(row)
+        else:
+            instance = self._model._from_row(row)
+            from ryx.fields import ForeignKey, OneToOneField
+            from ryx.relations import _resolve_model
+
+            for rel_str in self._select_related:
+                if rel_str in self._model._meta.fields:
+                    field = self._model._meta.fields[rel_str]
+                elif f"{rel_str}_id" in self._model._meta.fields:
+                    field = self._model._meta.fields[f"{rel_str}_id"]
+                else:
+                    continue
+
+                rel_name = rel_str.removesuffix("_id")
+                related_model = _resolve_model(field.to, self._model)
+                prefix = f"{rel_name}__"
+
+                rel_row = {
+                    k[len(prefix) :]: v
+                    for k, v in row.items()
+                    if k.startswith(prefix)
+                }
+
+                pk_col = (
+                    related_model._meta.pk_field.column
+                    if related_model._meta.pk_field
+                    else "id"
+                )
+                pk_val = rel_row.get(pk_col)
+                if (
+                    not rel_row
+                    or pk_val is None
+                    or pk_val == 0
+                    or all(v is None or v == "" for v in rel_row.values())
+                ):
+                    rel_instance = None
+                else:
+                    rel_instance = related_model._from_row(rel_row)
+                    if self._schema:
+                        rel_instance._schema = self._schema
+
+                cache_key = f"_cache_{rel_name}"
+                object.__setattr__(instance, cache_key, rel_instance)
+                if hasattr(field, "attname"):
+                    fk_pk = rel_instance.pk if rel_instance is not None else None
+                    object.__setattr__(instance, field.attname, fk_pk)
+
+        if self._schema:
+            instance._schema = self._schema
+
+        return instance
+
     async def _execute(self) -> list:
         alias = self._resolve_db_alias("read")
 
         builder = self._materialize_builder(alias)
 
         raw_rows = await builder.fetch_all()
-        return self._hydrate(raw_rows)
-
-    def _hydrate(self, raw_rows: list) -> list:
-        """Map raw rows to model instances, propagating the schema."""
-        instances = [self._model._from_row(row) for row in raw_rows]
-        if self._schema:
-            for inst in instances:
-                inst._schema = self._schema
-        return instances
+        return [self._reconstruct_row(row) for row in raw_rows]
 
     async def count(self) -> int:
         alias = self._resolve_db_alias("read")
 
-        builder = self._materialize_builder(alias)
+        builder = self._materialize_builder(alias, ignore_select_related=True)
 
         return await builder.fetch_count()
 
@@ -806,12 +968,7 @@ class QuerySet:
         builder = self._materialize_builder(alias)
 
         raw = await builder.set_limit(1).fetch_first()
-        if raw is None:
-            return None
-        inst = self._model._from_row(raw)
-        if self._schema:
-            inst._schema = self._schema
-        return inst
+        return None if raw is None else self._reconstruct_row(raw)
 
     async def get(self, *q_args: Q, **kwargs: Any) -> "Model":
         """Return exactly one instance. Raises DoesNotExist / MultipleObjectsReturned."""
@@ -834,15 +991,12 @@ class QuerySet:
                     f"get() returned more than one {self._model.__name__}."
                 ) from e
             raise
-        inst = self._model._from_row(raw)
-        if qs._schema:
-            inst._schema = qs._schema
-        return inst
+        return qs._reconstruct_row(raw)
 
     async def exists(self) -> bool:
         alias = self._resolve_db_alias("read")
 
-        builder = self._materialize_builder(alias)
+        builder = self._materialize_builder(alias, ignore_select_related=True)
 
         return await builder.fetch_count() > 0
 
