@@ -68,6 +68,23 @@ jobs:
       fail-fast: false
       matrix:
         python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    # PostgreSQL + pgvector for the multi-schema / vector-search integration tests.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ryx_integration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PG_TEST_URL: postgres://postgres:postgres@localhost:5432/ryx_integration_test
     steps:
       - uses: actions/checkout@v4
 
@@ -85,18 +102,24 @@ jobs:
       - name: Set up Python ${{ matrix.python }}
         run: uv python install ${{ matrix.python }}
 
+      # The Python project lives in ryx-python/ (the root Cargo.toml is a
+      # virtual workspace), so every uv/maturin command must run there.
       - name: Install dependencies
+        working-directory: ryx-python
         run: uv sync --all-extras --dev
 
       - name: Build and install Ryx
+        working-directory: ryx-python
         run: uv run maturin develop --release
 
       - name: Run pytest
-        run: uv run pytest ryx-python/tests/ -v --tb=short
+        working-directory: ryx-python
+        run: uv run pytest tests/ -v --tb=short
 
       - name: Run examples smoke test
+        working-directory: ryx-python
         run: |
-          for f in examples/*.py; do
+          for f in ../examples/*.py; do
             echo "Running $f ..."
             uv run python "$f"
           done
@@ -122,7 +145,8 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: --release --out dist
+          # Root Cargo.toml is a virtual workspace → point maturin at the crate.
+          args: --release --out dist --manifest-path ryx-python/Cargo.toml
           manylinux: auto
 
       - name: Upload wheel artifact
