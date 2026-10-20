@@ -1,6 +1,6 @@
 """
 ryx_core — type stubs for the compiled Rust extension
-========================================================
+==
 
 This file is the **only** stub file for Ryx's Rust layer.  It covers every
 symbol that ``src/lib.rs`` exposes to Python via PyO3:
@@ -344,7 +344,7 @@ class QueryBuilder:
 
     +---------------------------+------------------------------------------+
     | Method                    | SQL effect                               |
-    +===========================+==========================================+
+    +++
     | ``add_filter(...)``        | ``WHERE col lookup ?``                   |
     | ``add_q_node(...)``       | ``WHERE (… OR …)`` / Q-tree              |
     | ``add_annotation(...)``   | ``SELECT agg(col) AS alias``             |
@@ -360,7 +360,7 @@ class QueryBuilder:
 
     +---------------------------+------------------------------------------+
     | Method                    | SQL / return type                        |
-    +===========================+==========================================+
+    +++
     | ``fetch_all()``           | ``SELECT …``  → ``list[dict]``           |
     | ``fetch_first()``          | ``SELECT … LIMIT 1`` → ``dict | None``   |
     | ``fetch_get()``           | asserts exactly 1 row → ``dict``         |

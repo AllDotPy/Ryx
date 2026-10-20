@@ -18,9 +18,9 @@ pub use autodetect::*;
 pub mod runner;
 pub use runner::*;
 
-// ============================================================
+// 
 // State types
-// ============================================================
+// 
 
 /// A snapshot of a single database column, as seen in the live DB
 /// or as declared by a model.
@@ -63,9 +63,9 @@ pub struct SchemaState {
     pub tables: Vec<TableState>,
 }
 
-// ============================================================
+// 
 // Change / diff types
-// ============================================================
+// 
 
 /// The kind of schema change to perform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,9 +226,9 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
     changes
 }
 
-// ============================================================
+// 
 // DDL Generator (thin wrapper for backward compat)
-// ============================================================
+// 
 
 /// Generate DDL statements for the given changes on the specified backend.
 ///
@@ -237,9 +237,9 @@ pub fn generate_ddl(changes: &[SchemaChange], backend: Backend) -> Vec<String> {
     DDLGenerator::new(backend).generate(changes)
 }
 
-// ============================================================
+// 
 // Introspection
-// ============================================================
+// 
 
 pub const MIGRATIONS_TABLE: &str = "ryx_migrations";
 
@@ -539,9 +539,9 @@ pub(crate) fn get_int(row: &DecodedRow, key: &str) -> Option<i64> {
     })
 }
 
-// ============================================================
+// 
 // Utilities
-// ============================================================
+// 
 
 /// Detect backend type from a database URL string.
 ///
@@ -563,9 +563,9 @@ pub fn detect_backend(url: &str) -> Backend {
     }
 }
 
-// ============================================================
+// 
 // Migration Runner (backward-compat wrapper)
-// ============================================================
+// 
 
 /// Apply migrations — introspect, diff, and execute DDL.
 ///
@@ -646,9 +646,9 @@ impl MigrationRunner {
     }
 }
 
-// ============================================================
+// 
 // Tests
-// ============================================================
+// 
 
 #[cfg(test)]
 mod tests {

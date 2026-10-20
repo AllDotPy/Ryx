@@ -20,9 +20,9 @@ use async_trait::async_trait;
 use ryx_common::{RyxError, RyxResult};
 use tokio::sync::RwLock;
 
-// ============================================================
+// 
 // Storage trait
-// ============================================================
+// 
 
 /// A pluggable file storage backend.
 ///
@@ -94,9 +94,9 @@ pub trait Storage: Send + Sync {
     }
 }
 
-// ============================================================
+// 
 // Helpers
-// ============================================================
+// 
 
 /// Split a name into `(stem, extension)` where extension includes the dot.
 fn split_name(name: &str) -> (String, String) {
@@ -140,9 +140,9 @@ fn validate_relative(name: &str) -> RyxResult<()> {
     Ok(())
 }
 
-// ============================================================
+// 
 // Local filesystem storage (default)
-// ============================================================
+// 
 
 /// Filesystem-backed storage rooted at `root`.
 ///
@@ -257,9 +257,9 @@ impl Storage for LocalStorage {
     }
 }
 
-// ============================================================
+// 
 // In-memory storage (tests / ephemeral)
-// ============================================================
+// 
 
 /// An in-memory storage backend. Useful for tests.
 pub struct InMemoryStorage {
@@ -350,9 +350,9 @@ impl Storage for InMemoryStorage {
     }
 }
 
-// ============================================================
+// 
 // Global storage registry
-// ============================================================
+// 
 
 static GLOBAL_STORAGE: once_cell::sync::OnceCell<RwLock<Option<Arc<dyn Storage>>>> =
     once_cell::sync::OnceCell::new();
@@ -385,9 +385,9 @@ pub fn clear_storage() {
     }
 }
 
-// ============================================================
+// 
 // StoredFile — a value stored via a Storage backend
-// ============================================================
+// 
 
 /// A reference to a file stored via a [`Storage`] backend.
 ///
@@ -477,9 +477,9 @@ impl std::str::FromStr for StoredFile {
     }
 }
 
-// ============================================================
+// 
 // Tests
-// ============================================================
+// 
 
 #[cfg(test)]
 mod tests {

@@ -242,3 +242,4 @@ libryx_core*
 ex.py
 ryx.toml
 **/libryx*
+CODE_STYLE_GUIDE.md

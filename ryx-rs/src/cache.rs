@@ -12,9 +12,9 @@ use tokio::sync::RwLock;
 use crate::queryset::QuerySet;
 use crate::row::FromRow;
 
-// ============================================================
+// 
 // Cache Backend Trait
-// ============================================================
+// 
 
 /// A cache storage backend.
 ///
@@ -34,9 +34,9 @@ pub trait CacheBackend: Send + Sync {
     async fn clear(&self) -> RyxResult<()>;
 }
 
-// ============================================================
+// 
 // Memory Cache Backend
-// ============================================================
+// 
 
 /// An in-memory cache backend with TTL support and LRU eviction.
 ///
@@ -105,9 +105,9 @@ impl CacheBackend for MemoryCache {
     }
 }
 
-// ============================================================
+// 
 // Redis Cache Backend
-// ============================================================
+// 
 
 #[cfg(feature = "cache-redis")]
 pub mod redis_backend {
@@ -206,9 +206,9 @@ pub mod redis_backend {
     }
 }
 
-// ============================================================
+// 
 // Global Cache Registry
-// ============================================================
+// 
 
 static GLOBAL_CACHE: once_cell::sync::OnceCell<RwLock<Option<Arc<dyn CacheBackend>>>> =
     once_cell::sync::OnceCell::new();
@@ -228,9 +228,9 @@ pub fn configure_cache(backend: impl CacheBackend + 'static) {
     *guard = Some(Arc::new(backend));
 }
 
-// ============================================================
+// 
 // Cache Key Generation
-// ============================================================
+// 
 
 /// Generate a deterministic cache key from the compiled query.
 pub fn make_cache_key(model_name: &str, sql: &str, values_json: &str) -> String {
@@ -241,9 +241,9 @@ pub fn make_cache_key(model_name: &str, sql: &str, values_json: &str) -> String 
     format!("ryx:{}:{:016x}", model_name, hash)
 }
 
-// ============================================================
+// 
 // Cached QuerySet
-// ============================================================
+// 
 
 /// A wrapper around `QuerySet` that adds caching.
 ///
