@@ -21,7 +21,7 @@ build-backend = "maturin"
 name = "ryx"
 version = "0.1.5"
 description = "A Django-style Python ORM powered by sqlx (Rust) via PyO3."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 keywords = ["ORM", "Django", "sqlx", "database", "python", "performance", "rust"]

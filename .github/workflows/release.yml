@@ -68,8 +68,10 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
+          # The repo root Cargo.toml is a virtual workspace (no [package]),
+          # so maturin must be pointed at the Python crate's manifest.
+          args: --release --out dist --manifest-path ryx-python/Cargo.toml --interpreter 3.10 3.11 3.12 3.13 3.14
           target: ${{ matrix.target }}
-          args: --release --out dist --interpreter 3.10 3.11 3.12 3.13 3.14
           manylinux: ${{ matrix.manylinux }}
           rust-toolchain: stable
 
@@ -96,7 +98,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
-          args: --out dist
+          args: --out dist --manifest-path ryx-python/Cargo.toml
 
       - name: Upload sdist artifact
         uses: actions/upload-artifact@v4
