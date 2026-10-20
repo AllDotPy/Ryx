@@ -27,7 +27,12 @@ documentation = "https://docs.rs/Ryx"
 # "extension-module" is required when building a cdylib for Python import.
 # Without it, PyO3 tries to link against libpython, which breaks on Linux/macOS
 # when Python dynamically loads the extension.
-pyo3 = { version = "0.28.3", features = ["extension-module"] }
+#
+# "generate-import-lib" lets PyO3 generate the Windows import library (.lib)
+# at build time, so CI can cross-compile Windows wheels for a matrix of Python
+# versions without each target interpreter being installed. It is a no-op on
+# non-Windows platforms.
+pyo3 = { version = "0.28.3", features = ["extension-module", "generate-import-lib"] }
 
 # Async bridge 
 # pyo3-async-runtimes is the maintained successor of the abandoned pyo3-asyncio.
