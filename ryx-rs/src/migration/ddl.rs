@@ -1,9 +1,9 @@
 use crate::migration::{ChangeKind, ColumnState, SchemaChange, TableState};
 use ryx_query::Backend;
 
-// 
+//
 // DDL Generator
-// 
+//
 
 /// Backend-aware DDL generator.
 ///
@@ -116,10 +116,7 @@ impl DDLGenerator {
 
     /// Generate `DROP TABLE ...` with `IF EXISTS`.
     pub fn drop_table(&self, table_name: &str) -> String {
-        format!(
-            "DROP TABLE IF EXISTS {};",
-            self.qn(table_name)
-        )
+        format!("DROP TABLE IF EXISTS {};", self.qn(table_name))
     }
 
     /// Generate `ALTER TABLE ... ADD COLUMN ...` for an existing table.
@@ -352,9 +349,7 @@ impl DDLGenerator {
             let cols: Vec<ColumnState> = changes
                 .iter()
                 .filter(|c| {
-                    c.kind == ChangeKind::AddColumn
-                        && c.table == change.table
-                        && c.column.is_some()
+                    c.kind == ChangeKind::AddColumn && c.table == change.table && c.column.is_some()
                 })
                 .filter_map(|c| c.column.clone())
                 .collect();
@@ -366,9 +361,15 @@ impl DDLGenerator {
                     columns: cols,
                 };
                 let ddl_gen = if change.schema.is_empty() {
-                    Self { backend: self.backend, schema: self.schema.clone() }
+                    Self {
+                        backend: self.backend,
+                        schema: self.schema.clone(),
+                    }
                 } else {
-                    Self { backend: self.backend, schema: change.schema.clone() }
+                    Self {
+                        backend: self.backend,
+                        schema: change.schema.clone(),
+                    }
                 };
                 statements.push(ddl_gen.create_table(&table));
             }
@@ -382,9 +383,15 @@ impl DDLGenerator {
             {
                 if let Some(ref col) = change.column {
                     let ddl_gen = if change.schema.is_empty() {
-                        Self { backend: self.backend, schema: self.schema.clone() }
+                        Self {
+                            backend: self.backend,
+                            schema: self.schema.clone(),
+                        }
                     } else {
-                        Self { backend: self.backend, schema: change.schema.clone() }
+                        Self {
+                            backend: self.backend,
+                            schema: change.schema.clone(),
+                        }
                     };
                     statements.push(ddl_gen.add_column(&change.table, col));
                 }
@@ -400,9 +407,15 @@ impl DDLGenerator {
                 }
                 if let (Some(col), Some(old_col)) = (&change.column, &change.old_column) {
                     let ddl_gen = if change.schema.is_empty() {
-                        Self { backend: self.backend, schema: self.schema.clone() }
+                        Self {
+                            backend: self.backend,
+                            schema: self.schema.clone(),
+                        }
                     } else {
-                        Self { backend: self.backend, schema: change.schema.clone() }
+                        Self {
+                            backend: self.backend,
+                            schema: change.schema.clone(),
+                        }
                     };
                     statements.extend(ddl_gen.alter_column(&change.table, old_col, col));
                 }
@@ -413,9 +426,9 @@ impl DDLGenerator {
     }
 }
 
-// 
+//
 // Free functions (backward-compat)
-// 
+//
 
 pub fn col_type_for_backend(db_type: &str, backend: Backend) -> String {
     match backend {
@@ -567,12 +580,7 @@ mod tests {
     #[test]
     fn test_create_unique_index() {
         let g = DDLGenerator::new(Backend::PostgreSQL);
-        let sql = g.create_index(
-            "users",
-            "idx_email",
-            &["email".into()],
-            true,
-        );
+        let sql = g.create_index("users", "idx_email", &["email".into()], true);
         assert!(sql.contains("CREATE UNIQUE INDEX"));
         assert!(sql.contains("IF NOT EXISTS"));
     }
@@ -604,13 +612,7 @@ mod tests {
     #[test]
     fn test_add_foreign_key() {
         let g = DDLGenerator::new(Backend::PostgreSQL);
-        let sql = g.add_foreign_key(
-            "posts",
-            "fk_posts_author",
-            "author_id",
-            "authors",
-            "id",
-        );
+        let sql = g.add_foreign_key("posts", "fk_posts_author", "author_id", "authors", "id");
         assert!(sql.contains("FOREIGN KEY"));
         assert!(sql.contains("REFERENCES"));
         assert!(sql.contains("authors"));
@@ -677,8 +679,14 @@ mod tests {
     #[test]
     fn test_generate_schema_ddl() {
         let tables = vec![
-            table("authors", &[col("id", "INTEGER", true), col("name", "TEXT", false)]),
-            table("posts", &[col("id", "INTEGER", true), col("title", "TEXT", false)]),
+            table(
+                "authors",
+                &[col("id", "INTEGER", true), col("name", "TEXT", false)],
+            ),
+            table(
+                "posts",
+                &[col("id", "INTEGER", true), col("title", "TEXT", false)],
+            ),
         ];
         let stmts = generate_schema_ddl(&tables, Backend::SQLite);
         assert_eq!(stmts.len(), 2);
@@ -721,8 +729,10 @@ mod tests {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let t = table_in_schema("posts", "tenant1", &[col("id", "INTEGER", true)]);
         let sql = g.create_table(&t);
-        assert!(sql.contains(r#""tenant1"."posts""#),
-            "Table should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#),
+            "Table should be schema-qualified: {sql}"
+        );
         assert!(sql.contains("CREATE TABLE IF NOT EXISTS"));
     }
 
@@ -740,40 +750,50 @@ mod tests {
         let g = DDLGenerator::new(Backend::MySQL).in_schema("tenant1");
         let t = table_in_schema("posts", "tenant1", &[col("id", "INTEGER", true)]);
         let sql = g.create_table(&t);
-        assert!(!sql.contains("tenant1"),
-            "MySQL should not schema-qualify: {sql}");
+        assert!(
+            !sql.contains("tenant1"),
+            "MySQL should not schema-qualify: {sql}"
+        );
     }
 
     #[test]
     fn test_drop_table_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.drop_table("posts");
-        assert!(sql.contains(r#""tenant1"."posts""#),
-            "DROP TABLE should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#),
+            "DROP TABLE should be schema-qualified: {sql}"
+        );
     }
 
     #[test]
     fn test_add_column_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.add_column("posts", &col("title", "TEXT", false));
-        assert!(sql.contains(r#""tenant1"."posts""#),
-            "ALTER TABLE ADD COLUMN should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#),
+            "ALTER TABLE ADD COLUMN should be schema-qualified: {sql}"
+        );
     }
 
     #[test]
     fn test_drop_column_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.drop_column("posts", "title");
-        assert!(sql.contains(r#""tenant1"."posts""#),
-            "ALTER TABLE DROP COLUMN should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#),
+            "ALTER TABLE DROP COLUMN should be schema-qualified: {sql}"
+        );
     }
 
     #[test]
     fn test_create_index_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.create_index("posts", "idx_title", &["title".to_string()], false);
-        assert!(sql.contains(r#""tenant1"."posts""#),
-            "CREATE INDEX should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#),
+            "CREATE INDEX should be schema-qualified: {sql}"
+        );
     }
 
     #[test]
@@ -783,15 +803,20 @@ mod tests {
         // PostgreSQL DROP INDEX does not use table_name, just index name
         // Schema is not applied to index-only drops in PG
         assert!(sql.contains("idx_title") && sql.contains("DROP INDEX"));
-        assert!(!sql.contains("posts"), "PG DROP INDEX should not use table_name: {sql}");
+        assert!(
+            !sql.contains("posts"),
+            "PG DROP INDEX should not use table_name: {sql}"
+        );
     }
 
     #[test]
     fn test_drop_index_mysql_with_schema() {
         let g = DDLGenerator::new(Backend::MySQL).in_schema("tenant1");
         let sql = g.drop_index("posts", "idx_title");
-        assert!(!sql.contains("tenant1"),
-            "MySQL DROP INDEX should NOT schema-qualify table: {sql}");
+        assert!(
+            !sql.contains("tenant1"),
+            "MySQL DROP INDEX should NOT schema-qualify table: {sql}"
+        );
     }
 
     #[test]
@@ -800,24 +825,31 @@ mod tests {
         let old = col("title", "VARCHAR(100)", true);
         let new = col("title", "VARCHAR(200)", false);
         let stmts = g.alter_column("posts", &old, &new);
-        assert!(stmts.iter().any(|s| s.contains(r#""tenant1"."posts""#)),
-            "ALTER COLUMN should be schema-qualified: {:?}", stmts);
+        assert!(
+            stmts.iter().any(|s| s.contains(r#""tenant1"."posts""#)),
+            "ALTER COLUMN should be schema-qualified: {:?}",
+            stmts
+        );
     }
 
     #[test]
     fn test_add_foreign_key_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.add_foreign_key("posts", "fk_author", "author_id", "authors", "id");
-        assert!(sql.contains(r#""tenant1"."posts""#) && sql.contains(r#""tenant1"."authors""#),
-            "FOREIGN KEY should qualify both tables: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."posts""#) && sql.contains(r#""tenant1"."authors""#),
+            "FOREIGN KEY should qualify both tables: {sql}"
+        );
     }
 
     #[test]
     fn test_add_check_constraint_with_schema() {
         let g = DDLGenerator::new(Backend::PostgreSQL).in_schema("tenant1");
         let sql = g.add_check_constraint("users", "age_check", "age > 0");
-        assert!(sql.contains(r#""tenant1"."users""#),
-            "CHECK constraint should be schema-qualified: {sql}");
+        assert!(
+            sql.contains(r#""tenant1"."users""#),
+            "CHECK constraint should be schema-qualified: {sql}"
+        );
     }
 
     #[test]
@@ -828,10 +860,16 @@ mod tests {
         ];
         let stmts = generate_schema_ddl(&tables, Backend::PostgreSQL);
         assert_eq!(stmts.len(), 2);
-        assert!(stmts[0].contains(r#""tenant1"."posts""#),
-            "DDL should qualify table: {}", stmts[0]);
-        assert!(stmts[1].contains(r#""tenant1"."comments""#),
-            "DDL should qualify table: {}", stmts[1]);
+        assert!(
+            stmts[0].contains(r#""tenant1"."posts""#),
+            "DDL should qualify table: {}",
+            stmts[0]
+        );
+        assert!(
+            stmts[1].contains(r#""tenant1"."comments""#),
+            "DDL should qualify table: {}",
+            stmts[1]
+        );
     }
 
     #[test]

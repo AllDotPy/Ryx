@@ -1,8 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    parse_macro_input, Attribute, Data, DeriveInput, Fields, ItemStruct, Lit, Meta,
-    MetaNameValue, Type,
+    Attribute, Data, DeriveInput, Fields, ItemStruct, Lit, Meta, MetaNameValue, Type,
+    parse_macro_input,
 };
 
 /// Parsed content of a single `#[field(...)]` attribute.
@@ -40,26 +40,14 @@ fn parse_field_attr(field: &syn::Field) -> FieldAttr {
                 } else if segment == "unique" {
                     result.unique = true;
                 } else if let Some(val) = segment.strip_prefix("column = ") {
-                    result.column = Some(
-                        val.trim()
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
-                    );
+                    result.column =
+                        Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 } else if let Some(val) = segment.strip_prefix("db_type = ") {
-                    result.db_type = Some(
-                        val.trim()
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
-                    );
+                    result.db_type =
+                        Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 } else if let Some(val) = segment.strip_prefix("default = ") {
-                    result.default = Some(
-                        val.trim()
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
-                    );
+                    result.default =
+                        Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 }
             }
         }
@@ -101,9 +89,11 @@ fn parse_relation_attrs(attrs: &[Attribute]) -> Vec<RelationAttr> {
                 } else if let Some(val) = segment.strip_prefix("fk_column = ") {
                     rel.fk_column = val.trim().trim_matches('"').trim_matches('\'').to_string();
                 } else if let Some(val) = segment.strip_prefix("to_table = ") {
-                    rel.to_table = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
+                    rel.to_table =
+                        Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 } else if let Some(val) = segment.strip_prefix("to_field = ") {
-                    rel.to_field = Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
+                    rel.to_field =
+                        Some(val.trim().trim_matches('"').trim_matches('\'').to_string());
                 }
             }
             if rel.model.is_empty() {
@@ -129,7 +119,10 @@ fn parse_relation_attrs(attrs: &[Attribute]) -> Vec<RelationAttr> {
     relations
 }
 
-fn generate_relationships_impl(name: &syn::Ident, relations: &[RelationAttr]) -> proc_macro2::TokenStream {
+fn generate_relationships_impl(
+    name: &syn::Ident,
+    relations: &[RelationAttr],
+) -> proc_macro2::TokenStream {
     if relations.is_empty() {
         return quote! {};
     }
@@ -226,11 +219,7 @@ fn peel_option(ty: &Type) -> (&Type, bool) {
 /// Get the last path segment identifier of a type as a string.
 fn type_ident_str(ty: &Type) -> Option<String> {
     if let Type::Path(type_path) = ty {
-        type_path
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident.to_string())
+        type_path.path.segments.last().map(|s| s.ident.to_string())
     } else {
         None
     }
@@ -283,15 +272,13 @@ fn find_database_name(attrs: &[Attribute]) -> Option<String> {
 }
 
 fn field_column_name(field: &syn::Field) -> String {
-    parse_field_attr(field)
-        .column
-        .unwrap_or_else(|| {
-            field
-                .ident
-                .as_ref()
-                .map(|i| i.to_string())
-                .unwrap_or_default()
-        })
+    parse_field_attr(field).column.unwrap_or_else(|| {
+        field
+            .ident
+            .as_ref()
+            .map(|i| i.to_string())
+            .unwrap_or_default()
+    })
 }
 
 fn is_pk_field(field: &syn::Field) -> bool {
@@ -312,7 +299,6 @@ fn type_to_sql_reader_expr(
     col_expr: proc_macro2::TokenStream,
     err_col: proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
-
     match ty {
         Type::Path(type_path) => {
             let ident = &type_path.path.segments.last().unwrap().ident;
@@ -323,7 +309,8 @@ fn type_to_sql_reader_expr(
                 let inner_type = &type_path.path.segments.last().unwrap();
                 if let syn::PathArguments::AngleBracketed(args) = &inner_type.arguments {
                     if let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first() {
-                        let inner = type_to_sql_reader_expr(inner_ty, col_expr.clone(), err_col.clone());
+                        let inner =
+                            type_to_sql_reader_expr(inner_ty, col_expr.clone(), err_col.clone());
                         return quote! {
                             match row.get(#col_expr) {
                                 Some(v) => Some({ #inner }),
@@ -408,7 +395,11 @@ fn field_names(fields: &Fields) -> Vec<String> {
             for field in &named.named {
                 let col = field_column_name(field);
                 let name = if col.is_empty() {
-                    field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default()
+                    field
+                        .ident
+                        .as_ref()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default()
                 } else {
                     col
                 };
@@ -425,7 +416,11 @@ fn pk_field_name(fields: &Fields) -> String {
         Fields::Named(named) => {
             for field in &named.named {
                 if is_pk_field(field) {
-                    return field.ident.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                    return field
+                        .ident
+                        .as_ref()
+                        .map(|i| i.to_string())
+                        .unwrap_or_default();
                 }
             }
         }
@@ -456,8 +451,7 @@ pub fn derive_model(input: TokenStream) -> TokenStream {
     } else {
         table_name
     };
-    let database_name = find_database_name(&input.attrs)
-        .unwrap_or_else(|| "default".to_string());
+    let database_name = find_database_name(&input.attrs).unwrap_or_else(|| "default".to_string());
 
     let fields = match &input.data {
         Data::Struct(data) => &data.fields,
@@ -708,12 +702,14 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         table_name
     };
-    let database_name = find_database_name(&strukt.attrs)
-        .unwrap_or_else(|| "default".to_string());
+    let database_name = find_database_name(&strukt.attrs).unwrap_or_else(|| "default".to_string());
 
     // Strip #[table], #[field], #[relation], #[database] helper attrs
     strukt.attrs.retain(|a| {
-        !a.path().is_ident("table") && !a.path().is_ident("field") && !a.path().is_ident("relation") && !a.path().is_ident("database")
+        !a.path().is_ident("table")
+            && !a.path().is_ident("field")
+            && !a.path().is_ident("relation")
+            && !a.path().is_ident("database")
     });
     // Also strip #[field] from each field
     if let syn::Fields::Named(ref mut named) = strukt.fields {
@@ -741,7 +737,10 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     col_name
                 };
                 let field_name = &field.ident;
-                let field_name_str = field_name.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                let field_name_str = field_name
+                    .as_ref()
+                    .map(|i| i.to_string())
+                    .unwrap_or_default();
                 if relation_field_names.contains(&field_name_str) {
                     Some(quote! { #field_name: None })
                 } else {
@@ -770,7 +769,10 @@ pub fn model(_attr: TokenStream, item: TokenStream) -> TokenStream {
                     col_name
                 };
                 let field_name = &field.ident;
-                let field_name_str = field_name.as_ref().map(|i| i.to_string()).unwrap_or_default();
+                let field_name_str = field_name
+                    .as_ref()
+                    .map(|i| i.to_string())
+                    .unwrap_or_default();
                 if relation_field_names.contains(&field_name_str) {
                     Some(quote! { #field_name: None })
                 } else {

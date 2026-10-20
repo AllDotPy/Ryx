@@ -1,5 +1,5 @@
-use ryx_rs::model;
 use ryx_rs::Model;
+use ryx_rs::model;
 
 /// Verify that `#[model]` derives Serialize + Deserialize.
 #[model]

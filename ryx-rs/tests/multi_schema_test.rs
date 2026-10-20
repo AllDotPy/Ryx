@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use ryx_rs::PoolConfig;
 use ryx_rs::migration::MigrationRunner;
 use ryx_rs::model;
-use ryx_rs::PoolConfig;
 
 // ── Model definitions ─────────────────────────────────
 
@@ -25,19 +25,22 @@ struct MsAuthor {
 // ── Helpers ────────────────────────────────────────────
 
 fn pg_url() -> Option<String> {
-    std::env::var("PG_TEST_URL").ok().or_else(|| {
-        Some("postgres://einswilli@localhost/ryx_integration_test".into())
-    })
+    std::env::var("PG_TEST_URL")
+        .ok()
+        .or_else(|| Some("postgres://einswilli@localhost/ryx_integration_test".into()))
 }
 
 async fn init_pg_pool(url: &str) {
     let mut urls = HashMap::new();
     urls.insert("default".into(), url.into());
-    ryx_backend::pool::initialize(urls, PoolConfig {
-        max_connections: 2,
-        min_connections: 1,
-        ..Default::default()
-    })
+    ryx_backend::pool::initialize(
+        urls,
+        PoolConfig {
+            max_connections: 2,
+            min_connections: 1,
+            ..Default::default()
+        },
+    )
     .await
     .expect("Failed to init PG pool");
 }
@@ -150,8 +153,7 @@ async fn multi_schema_migration_pipeline() {
         let backend = ryx_backend::pool::get(None).unwrap();
         backend
             .fetch_raw(
-                "INSERT INTO \"tenant1\".\"ms_posts\" (title) VALUES ('Post 1'), ('Post 2')"
-                    .into(),
+                "INSERT INTO \"tenant1\".\"ms_posts\" (title) VALUES ('Post 1'), ('Post 2')".into(),
                 None,
             )
             .await

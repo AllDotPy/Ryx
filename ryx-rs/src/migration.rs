@@ -18,9 +18,9 @@ pub use autodetect::*;
 pub mod runner;
 pub use runner::*;
 
-// 
+//
 // State types
-// 
+//
 
 /// A snapshot of a single database column, as seen in the live DB
 /// or as declared by a model.
@@ -63,9 +63,9 @@ pub struct SchemaState {
     pub tables: Vec<TableState>,
 }
 
-// 
+//
 // Change / diff types
-// 
+//
 
 /// The kind of schema change to perform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,10 +135,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                 schema: table.schema.clone(),
                 column: None,
                 old_column: None,
-                description: format!(
-                    "Create table {}.{}",
-                    table.schema, table.name
-                ),
+                description: format!("Create table {}.{}", table.schema, table.name),
             });
         }
     }
@@ -159,10 +156,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
                 schema: table.schema.clone(),
                 column: Some(col.clone()),
                 old_column: None,
-                description: format!(
-                    "Add column {}.{}.{}",
-                    table.schema, table.name, col.name
-                ),
+                description: format!("Add column {}.{}.{}", table.schema, table.name, col.name),
             });
         }
     }
@@ -174,8 +168,11 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
             .iter()
             .find(|t| t.schema == table.schema && t.name == table.name)
         {
-            let current_names: Vec<&str> =
-                current_table.columns.iter().map(|c| c.name.as_str()).collect();
+            let current_names: Vec<&str> = current_table
+                .columns
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect();
             for col in &table.columns {
                 if !current_names.contains(&col.name.as_str()) {
                     changes.push(SchemaChange {
@@ -202,8 +199,7 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
             .find(|t| t.schema == table.schema && t.name == table.name)
         {
             for col in &table.columns {
-                if let Some(current_col) =
-                    current_table.columns.iter().find(|c| c.name == col.name)
+                if let Some(current_col) = current_table.columns.iter().find(|c| c.name == col.name)
                 {
                     if col != current_col {
                         changes.push(SchemaChange {
@@ -226,9 +222,9 @@ pub fn diff_states(current: &SchemaState, target: &SchemaState) -> Vec<SchemaCha
     changes
 }
 
-// 
+//
 // DDL Generator (thin wrapper for backward compat)
-// 
+//
 
 /// Generate DDL statements for the given changes on the specified backend.
 ///
@@ -237,9 +233,9 @@ pub fn generate_ddl(changes: &[SchemaChange], backend: Backend) -> Vec<String> {
     DDLGenerator::new(backend).generate(changes)
 }
 
-// 
+//
 // Introspection
-// 
+//
 
 pub const MIGRATIONS_TABLE: &str = "ryx_migrations";
 
@@ -311,7 +307,10 @@ async fn introspect_columns_sqlite(
 
 // ── PostgreSQL ───────────────────────────────────────────────
 
-async fn introspect_schema_postgres(backend: &dyn RyxBackend, schema: &str) -> RyxResult<SchemaState> {
+async fn introspect_schema_postgres(
+    backend: &dyn RyxBackend,
+    schema: &str,
+) -> RyxResult<SchemaState> {
     let schema_clause = if schema.is_empty() {
         "table_schema = 'public'".to_string()
     } else {
@@ -396,7 +395,10 @@ async fn get_constraint_columns_postgres(
            AND tc.constraint_type = '{constraint_type}'"
     );
     let rows = backend.fetch_raw(sql, None).await?;
-    Ok(rows.iter().filter_map(|r| get_text(r, "column_name")).collect())
+    Ok(rows
+        .iter()
+        .filter_map(|r| get_text(r, "column_name"))
+        .collect())
 }
 
 fn normalize_pg_type(raw: &str) -> String {
@@ -501,7 +503,10 @@ async fn get_constraint_columns_mysql(
            AND tc.constraint_type = '{constraint_type}'"
     );
     let rows = backend.fetch_raw(sql, None).await?;
-    Ok(rows.iter().filter_map(|r| get_text(r, "column_name")).collect())
+    Ok(rows
+        .iter()
+        .filter_map(|r| get_text(r, "column_name"))
+        .collect())
 }
 
 fn normalize_mysql_type(raw: &str) -> String {
@@ -539,9 +544,9 @@ pub(crate) fn get_int(row: &DecodedRow, key: &str) -> Option<i64> {
     })
 }
 
-// 
+//
 // Utilities
-// 
+//
 
 /// Detect backend type from a database URL string.
 ///
@@ -563,9 +568,9 @@ pub fn detect_backend(url: &str) -> Backend {
     }
 }
 
-// 
+//
 // Migration Runner (backward-compat wrapper)
-// 
+//
 
 /// Apply migrations — introspect, diff, and execute DDL.
 ///
@@ -646,9 +651,9 @@ impl MigrationRunner {
     }
 }
 
-// 
+//
 // Tests
-// 
+//
 
 #[cfg(test)]
 mod tests {
@@ -729,7 +734,10 @@ mod tests {
         assert_eq!(col_type_for_backend("BOOLEAN", Backend::SQLite), "INTEGER");
         assert_eq!(col_type_for_backend("INTEGER", Backend::SQLite), "INTEGER");
         assert_eq!(col_type_for_backend("BIGINT", Backend::SQLite), "INTEGER");
-        assert_eq!(col_type_for_backend("DOUBLE PRECISION", Backend::SQLite), "REAL");
+        assert_eq!(
+            col_type_for_backend("DOUBLE PRECISION", Backend::SQLite),
+            "REAL"
+        );
         assert_eq!(col_type_for_backend("REAL", Backend::SQLite), "REAL");
         assert_eq!(col_type_for_backend("TEXT", Backend::SQLite), "TEXT");
         assert_eq!(col_type_for_backend("UUID", Backend::SQLite), "TEXT");
@@ -738,24 +746,48 @@ mod tests {
 
     #[test]
     fn test_col_type_postgres() {
-        assert_eq!(col_type_for_backend("BOOLEAN", Backend::PostgreSQL), "BOOLEAN");
-        assert_eq!(col_type_for_backend("INTEGER", Backend::PostgreSQL), "INTEGER");
-        assert_eq!(col_type_for_backend("BIGINT", Backend::PostgreSQL), "BIGINT");
-        assert_eq!(col_type_for_backend("DOUBLE PRECISION", Backend::PostgreSQL), "DOUBLE PRECISION");
-        assert_eq!(col_type_for_backend("TIMESTAMP", Backend::PostgreSQL), "TIMESTAMP");
+        assert_eq!(
+            col_type_for_backend("BOOLEAN", Backend::PostgreSQL),
+            "BOOLEAN"
+        );
+        assert_eq!(
+            col_type_for_backend("INTEGER", Backend::PostgreSQL),
+            "INTEGER"
+        );
+        assert_eq!(
+            col_type_for_backend("BIGINT", Backend::PostgreSQL),
+            "BIGINT"
+        );
+        assert_eq!(
+            col_type_for_backend("DOUBLE PRECISION", Backend::PostgreSQL),
+            "DOUBLE PRECISION"
+        );
+        assert_eq!(
+            col_type_for_backend("TIMESTAMP", Backend::PostgreSQL),
+            "TIMESTAMP"
+        );
         assert_eq!(col_type_for_backend("UUID", Backend::PostgreSQL), "UUID");
         assert_eq!(col_type_for_backend("JSONB", Backend::PostgreSQL), "JSONB");
     }
 
     #[test]
     fn test_col_type_mysql() {
-        assert_eq!(col_type_for_backend("BOOLEAN", Backend::MySQL), "TINYINT(1)");
+        assert_eq!(
+            col_type_for_backend("BOOLEAN", Backend::MySQL),
+            "TINYINT(1)"
+        );
         assert_eq!(col_type_for_backend("INTEGER", Backend::MySQL), "INT");
         assert_eq!(col_type_for_backend("BIGINT", Backend::MySQL), "BIGINT");
-        assert_eq!(col_type_for_backend("DOUBLE PRECISION", Backend::MySQL), "DOUBLE");
+        assert_eq!(
+            col_type_for_backend("DOUBLE PRECISION", Backend::MySQL),
+            "DOUBLE"
+        );
         assert_eq!(col_type_for_backend("REAL", Backend::MySQL), "FLOAT");
         assert_eq!(col_type_for_backend("TEXT", Backend::MySQL), "TEXT");
-        assert_eq!(col_type_for_backend("TIMESTAMP", Backend::MySQL), "DATETIME");
+        assert_eq!(
+            col_type_for_backend("TIMESTAMP", Backend::MySQL),
+            "DATETIME"
+        );
         assert_eq!(col_type_for_backend("UUID", Backend::MySQL), "CHAR(36)");
         assert_eq!(col_type_for_backend("JSONB", Backend::MySQL), "JSON");
     }
@@ -884,13 +916,19 @@ mod tests {
     fn test_diff_empty_to_table() {
         let current = SchemaState { tables: vec![] };
         let target = SchemaState {
-            tables: vec![table("posts", &[("id", "INTEGER", true), ("title", "TEXT", false)])],
+            tables: vec![table(
+                "posts",
+                &[("id", "INTEGER", true), ("title", "TEXT", false)],
+            )],
         };
         let changes = diff_states(&current, &target);
         assert_eq!(changes.len(), 3); // CreateTable + 2 AddColumn
         assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateTable));
         assert_eq!(
-            changes.iter().filter(|c| c.kind == ChangeKind::AddColumn).count(),
+            changes
+                .iter()
+                .filter(|c| c.kind == ChangeKind::AddColumn)
+                .count(),
             2
         );
     }
@@ -901,7 +939,10 @@ mod tests {
             tables: vec![table("posts", &[("id", "INTEGER", true)])],
         };
         let target = SchemaState {
-            tables: vec![table("posts", &[("id", "INTEGER", true), ("title", "TEXT", false)])],
+            tables: vec![table(
+                "posts",
+                &[("id", "INTEGER", true), ("title", "TEXT", false)],
+            )],
         };
         let changes = diff_states(&current, &target);
         assert_eq!(changes.len(), 1);
@@ -912,10 +953,16 @@ mod tests {
     #[test]
     fn test_diff_alter_column() {
         let current = SchemaState {
-            tables: vec![table("posts", &[("id", "INTEGER", true), ("title", "TEXT", false)])],
+            tables: vec![table(
+                "posts",
+                &[("id", "INTEGER", true), ("title", "TEXT", false)],
+            )],
         };
         let target = SchemaState {
-            tables: vec![table("posts", &[("id", "INTEGER", true), ("title", "VARCHAR", false)])],
+            tables: vec![table(
+                "posts",
+                &[("id", "INTEGER", true), ("title", "VARCHAR", false)],
+            )],
         };
         let changes = diff_states(&current, &target);
         assert_eq!(changes.len(), 1);
@@ -940,13 +987,19 @@ mod tests {
         let target = SchemaState {
             tables: vec![
                 table("posts", &[("id", "INTEGER", true)]),
-                table("authors", &[("id", "INTEGER", true), ("name", "TEXT", false)]),
+                table(
+                    "authors",
+                    &[("id", "INTEGER", true), ("name", "TEXT", false)],
+                ),
             ],
         };
         let changes = diff_states(&current, &target);
         assert_eq!(changes.len(), 5); // 2 CreateTable + 3 AddColumn (1 for posts + 2 for authors)
         assert_eq!(
-            changes.iter().filter(|c| c.kind == ChangeKind::CreateTable).count(),
+            changes
+                .iter()
+                .filter(|c| c.kind == ChangeKind::CreateTable)
+                .count(),
             2
         );
     }
@@ -962,7 +1015,7 @@ mod tests {
                 schema: String::new(),
                 column: None,
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -977,7 +1030,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -992,7 +1045,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
         ];
         let sql = generate_ddl(&changes, Backend::SQLite);
@@ -1013,7 +1066,7 @@ mod tests {
                 schema: String::new(),
                 column: None,
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1028,7 +1081,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
             SchemaChange {
                 kind: ChangeKind::AddColumn,
@@ -1043,7 +1096,7 @@ mod tests {
                     default: None,
                 }),
                 old_column: None,
-            description: String::new(),
+                description: String::new(),
             },
         ];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
@@ -1068,7 +1121,7 @@ mod tests {
                 default: None,
             }),
             old_column: None,
-        description: String::new(),
+            description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
         assert_eq!(sql.len(), 1);
@@ -1098,7 +1151,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
-        description: String::new(),
+            description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::PostgreSQL);
         assert_eq!(sql.len(), 2);
@@ -1129,7 +1182,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
-        description: String::new(),
+            description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::MySQL);
         assert_eq!(sql.len(), 1);
@@ -1160,7 +1213,7 @@ mod tests {
                 unique: false,
                 default: None,
             }),
-        description: String::new(),
+            description: String::new(),
         }];
         let sql = generate_ddl(&changes, Backend::SQLite);
         assert!(sql.is_empty(), "SQLite ALTER COLUMN should be no-op");
@@ -1217,37 +1270,74 @@ mod tests {
     fn test_diff_create_schema_detected() {
         let current = SchemaState { tables: vec![] };
         let target = SchemaState {
-            tables: vec![table_in_schema("posts", "tenant1", &[("id", "INTEGER", true)])],
+            tables: vec![table_in_schema(
+                "posts",
+                "tenant1",
+                &[("id", "INTEGER", true)],
+            )],
         };
         let changes = diff_states(&current, &target);
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateSchema),
-            "Should detect CreateSchema for new schema 'tenant1'");
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateTable),
-            "Should also detect CreateTable for the new table");
+        assert!(
+            changes.iter().any(|c| c.kind == ChangeKind::CreateSchema),
+            "Should detect CreateSchema for new schema 'tenant1'"
+        );
+        assert!(
+            changes.iter().any(|c| c.kind == ChangeKind::CreateTable),
+            "Should also detect CreateTable for the new table"
+        );
         // CreateSchema should appear before CreateTable
-        let idx_schema = changes.iter().position(|c| c.kind == ChangeKind::CreateSchema).unwrap();
-        let idx_table = changes.iter().position(|c| c.kind == ChangeKind::CreateTable).unwrap();
-        assert!(idx_schema < idx_table, "CreateSchema must precede CreateTable");
+        let idx_schema = changes
+            .iter()
+            .position(|c| c.kind == ChangeKind::CreateSchema)
+            .unwrap();
+        let idx_table = changes
+            .iter()
+            .position(|c| c.kind == ChangeKind::CreateTable)
+            .unwrap();
+        assert!(
+            idx_schema < idx_table,
+            "CreateSchema must precede CreateTable"
+        );
     }
 
     #[test]
     fn test_diff_same_table_different_schemas() {
         let current = SchemaState {
-            tables: vec![table_in_schema("posts", "tenant1", &[("id", "INTEGER", true)])],
+            tables: vec![table_in_schema(
+                "posts",
+                "tenant1",
+                &[("id", "INTEGER", true)],
+            )],
         };
         let target = SchemaState {
             tables: vec![
-                table_in_schema("posts", "tenant1", &[("id", "INTEGER", true), ("title", "TEXT", false)]),
+                table_in_schema(
+                    "posts",
+                    "tenant1",
+                    &[("id", "INTEGER", true), ("title", "TEXT", false)],
+                ),
                 table_in_schema("posts", "tenant2", &[("id", "INTEGER", true)]),
             ],
         };
         let changes = diff_states(&current, &target);
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::AddColumn && c.schema == "tenant1"),
-            "Should add column to tenant1.posts");
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateSchema && c.schema == "tenant2"),
-            "Should CreateSchema for tenant2");
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateTable && c.table == "posts" && c.schema == "tenant2"),
-            "Should CreateTable for tenant2.posts");
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.kind == ChangeKind::AddColumn && c.schema == "tenant1"),
+            "Should add column to tenant1.posts"
+        );
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.kind == ChangeKind::CreateSchema && c.schema == "tenant2"),
+            "Should CreateSchema for tenant2"
+        );
+        assert!(
+            changes.iter().any(|c| c.kind == ChangeKind::CreateTable
+                && c.table == "posts"
+                && c.schema == "tenant2"),
+            "Should CreateTable for tenant2.posts"
+        );
     }
 
     #[test]
@@ -1258,33 +1348,58 @@ mod tests {
         };
         let changes = diff_states(&current, &target);
         // Empty schema tables should NOT trigger CreateSchema
-        assert!(!changes.iter().any(|c| c.kind == ChangeKind::CreateSchema),
-            "Empty schema should not produce CreateSchema");
-        assert!(changes.iter().any(|c| c.kind == ChangeKind::CreateTable),
-            "Should still CreateTable");
+        assert!(
+            !changes.iter().any(|c| c.kind == ChangeKind::CreateSchema),
+            "Empty schema should not produce CreateSchema"
+        );
+        assert!(
+            changes.iter().any(|c| c.kind == ChangeKind::CreateTable),
+            "Should still CreateTable"
+        );
     }
 
     #[test]
     fn test_diff_schema_noop_when_identical() {
         let current = SchemaState {
-            tables: vec![table_in_schema("posts", "tenant1", &[("id", "INTEGER", true)])],
+            tables: vec![table_in_schema(
+                "posts",
+                "tenant1",
+                &[("id", "INTEGER", true)],
+            )],
         };
         let target = SchemaState {
-            tables: vec![table_in_schema("posts", "tenant1", &[("id", "INTEGER", true)])],
+            tables: vec![table_in_schema(
+                "posts",
+                "tenant1",
+                &[("id", "INTEGER", true)],
+            )],
         };
         let changes = diff_states(&current, &target);
-        assert!(changes.is_empty(), "Identical schema states should produce no changes");
+        assert!(
+            changes.is_empty(),
+            "Identical schema states should produce no changes"
+        );
     }
 
     #[test]
     fn test_schema_change_carries_schema() {
         let current = SchemaState { tables: vec![] };
         let target = SchemaState {
-            tables: vec![table_in_schema("posts", "tenant1", &[("id", "INTEGER", true)])],
+            tables: vec![table_in_schema(
+                "posts",
+                "tenant1",
+                &[("id", "INTEGER", true)],
+            )],
         };
         let changes = diff_states(&current, &target);
-        let create_table = changes.iter().find(|c| c.kind == ChangeKind::CreateTable).unwrap();
-        assert_eq!(create_table.schema, "tenant1", "CreateTable change must carry schema");
+        let create_table = changes
+            .iter()
+            .find(|c| c.kind == ChangeKind::CreateTable)
+            .unwrap();
+        assert_eq!(
+            create_table.schema, "tenant1",
+            "CreateTable change must carry schema"
+        );
     }
 
     #[test]
@@ -1293,15 +1408,28 @@ mod tests {
         let current = SchemaState { tables: vec![] };
         let target = SchemaState {
             tables: vec![
-                table("users", &[("id", "INTEGER", true)]),                // no schema
-                table_in_schema("posts", "blog", &[("id", "INTEGER", true)]),  // in 'blog'
+                table("users", &[("id", "INTEGER", true)]), // no schema
+                table_in_schema("posts", "blog", &[("id", "INTEGER", true)]), // in 'blog'
             ],
         };
         let changes = diff_states(&current, &target);
-        let create_schema_count = changes.iter().filter(|c| c.kind == ChangeKind::CreateSchema).count();
+        let create_schema_count = changes
+            .iter()
+            .filter(|c| c.kind == ChangeKind::CreateSchema)
+            .count();
         assert_eq!(create_schema_count, 1, "Only one CreateSchema for 'blog'");
-        assert!(!changes.iter().any(|c| c.kind == ChangeKind::CreateSchema && c.schema.is_empty()),
-            "No CreateSchema for empty-schema tables");
-        assert_eq!(changes.iter().filter(|c| c.kind == ChangeKind::CreateTable).count(), 2);
+        assert!(
+            !changes
+                .iter()
+                .any(|c| c.kind == ChangeKind::CreateSchema && c.schema.is_empty()),
+            "No CreateSchema for empty-schema tables"
+        );
+        assert_eq!(
+            changes
+                .iter()
+                .filter(|c| c.kind == ChangeKind::CreateTable)
+                .count(),
+            2
+        );
     }
 }

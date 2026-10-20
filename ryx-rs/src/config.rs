@@ -143,10 +143,7 @@ impl StorageConfig {
                 crate::storage::configure_storage(s);
             }
             Some(_) => {
-                let root = self
-                    .root
-                    .clone()
-                    .unwrap_or_else(|| "media".to_string());
+                let root = self.root.clone().unwrap_or_else(|| "media".to_string());
                 let s = crate::storage::LocalStorage::new(root);
                 let s = match &self.base_url {
                     Some(u) => s.with_base_url(u.clone()),

@@ -8,9 +8,8 @@ use ryx_query::symbols::Symbol;
 use crate::into_sql::IntoSqlValue;
 
 /// Set of all known lookups, computed once from the registry.
-static KNOWN_LOOKUPS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
-    ryx_query::lookups::all_lookups().iter().copied().collect()
-});
+static KNOWN_LOOKUPS: Lazy<HashSet<&'static str>> =
+    Lazy::new(|| ryx_query::lookups::all_lookups().iter().copied().collect());
 
 /// Parse a Django-style field key into (column_name, lookup).
 ///
@@ -123,12 +122,8 @@ pub(crate) fn q_to_qnode(q: Q) -> QNode {
             value,
             negated,
         },
-        Q::And(children) => {
-            QNode::And(children.into_iter().map(q_to_qnode).collect())
-        }
-        Q::Or(children) => {
-            QNode::Or(children.into_iter().map(q_to_qnode).collect())
-        }
+        Q::And(children) => QNode::And(children.into_iter().map(q_to_qnode).collect()),
+        Q::Or(children) => QNode::Or(children.into_iter().map(q_to_qnode).collect()),
         Q::Not(child) => QNode::Not(Box::new(q_to_qnode(*child))),
     }
 }

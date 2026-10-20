@@ -7,5 +7,5 @@ pub use model::{FieldMeta, ModelMeta};
 pub use pool::PoolConfig;
 
 // Re-export key types from ryx-query for convenience
-pub use ryx_query::ast::SqlValue;
 pub use ryx_query::Backend;
+pub use ryx_query::ast::SqlValue;

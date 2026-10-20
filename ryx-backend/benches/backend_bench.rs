@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use ryx_backend::backends::RyxBackend;
 use ryx_backend::pool;
 use ryx_common::PoolConfig;
+use ryx_query::Backend;
 use ryx_query::ast::{
     FilterNode, OrderByClause, QNode, QueryNode, QueryOperation, SortDirection, SqlValue,
 };
-use ryx_query::Backend;
 use tokio::runtime::Runtime;
 
 static RT: OnceLock<Runtime> = OnceLock::new();
@@ -94,7 +94,10 @@ fn bench_raw_select_single(c: &mut Criterion) {
             let be = be.clone();
             async move {
                 let rows = be
-                    .fetch_raw(black_box("SELECT * FROM bench_items WHERE id = 5000".into()), None)
+                    .fetch_raw(
+                        black_box("SELECT * FROM bench_items WHERE id = 5000".into()),
+                        None,
+                    )
                     .await
                     .unwrap();
                 black_box(rows)
@@ -110,7 +113,10 @@ fn bench_raw_select_100(c: &mut Criterion) {
             let be = be.clone();
             async move {
                 let rows = be
-                    .fetch_raw(black_box("SELECT * FROM bench_items LIMIT 100".into()), None)
+                    .fetch_raw(
+                        black_box("SELECT * FROM bench_items LIMIT 100".into()),
+                        None,
+                    )
                     .await
                     .unwrap();
                 black_box(rows)
@@ -127,7 +133,9 @@ fn bench_raw_select_count(c: &mut Criterion) {
             async move {
                 let rows = be
                     .fetch_raw(
-                        black_box("SELECT COUNT(*) as cnt FROM bench_items WHERE active = 1".into()),
+                        black_box(
+                            "SELECT COUNT(*) as cnt FROM bench_items WHERE active = 1".into(),
+                        ),
                         None,
                     )
                     .await

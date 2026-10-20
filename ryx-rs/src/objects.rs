@@ -51,7 +51,7 @@ impl<T: Model + FromRow> ObjectsManager<T> {
     }
 }
 
-//  INSERT BUILDER 
+//  INSERT BUILDER
 
 pub struct InsertBuilder<T> {
     values: Vec<(String, SqlValue)>,
@@ -87,8 +87,8 @@ impl<T: Model + FromRow> InsertBuilder<T> {
 
     pub async fn save(self) -> RyxResult<T> {
         let table = T::table_name();
-        let backend = ryx_backend::pool::get_backend(None)
-            .unwrap_or(ryx_query::Backend::PostgreSQL);
+        let backend =
+            ryx_backend::pool::get_backend(None).unwrap_or(ryx_query::Backend::PostgreSQL);
         let mut node = QueryNode::select(table);
         node.backend = backend;
         if !self.schema.is_empty() {

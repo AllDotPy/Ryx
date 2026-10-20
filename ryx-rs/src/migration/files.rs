@@ -29,8 +29,7 @@ pub struct MigrationFile {
 pub fn load_migration_file(path: &Path) -> Result<MigrationFile, String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
-    serde_yaml::from_str(&content)
-        .map_err(|e| format!("Invalid YAML in {}: {}", path.display(), e))
+    serde_yaml::from_str(&content).map_err(|e| format!("Invalid YAML in {}: {}", path.display(), e))
 }
 
 /// Write operations to a new migration file.
@@ -55,11 +54,10 @@ pub fn write_migration_file(
         dependencies: vec![],
         operations: operations.to_vec(),
     };
-    let yaml = serde_yaml::to_string(&file)
-        .map_err(|e| format!("Cannot serialize migration: {}", e))?;
+    let yaml =
+        serde_yaml::to_string(&file).map_err(|e| format!("Cannot serialize migration: {}", e))?;
 
-    std::fs::write(&path, yaml)
-        .map_err(|e| format!("Cannot write {}: {}", path.display(), e))?;
+    std::fs::write(&path, yaml).map_err(|e| format!("Cannot write {}: {}", path.display(), e))?;
 
     Ok(path)
 }
@@ -140,12 +138,18 @@ fn slug_from_operations(ops: &[Operation]) -> String {
                 format!("add_{}_{}", table_name, column.name)
             }
             Operation::AlterField {
-                table_name, new_column, ..
+                table_name,
+                new_column,
+                ..
             } => {
                 format!("alter_{}_{}", table_name, new_column.name)
             }
             Operation::CreateIndex { index_name, .. } => format!("create_index_{index_name}"),
-            Operation::RemoveField { table_name, column_name, .. } => {
+            Operation::RemoveField {
+                table_name,
+                column_name,
+                ..
+            } => {
                 format!("remove_{}_{}", table_name, column_name)
             }
             Operation::DeleteIndex { index_name, .. } => format!("delete_index_{index_name}"),
@@ -196,7 +200,13 @@ mod tests {
 
         let path = write_migration_file(&ops, &dir).unwrap();
         assert!(path.exists());
-        assert!(path.file_name().unwrap().to_str().unwrap().starts_with("0001"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("0001")
+        );
 
         let loaded = load_migration_file(&path).unwrap();
         assert_eq!(loaded.operations.len(), 1);

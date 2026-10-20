@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use ryx_backend::transaction::set_current_transaction;
 use ryx_backend::transaction::TransactionHandle as BackendTxHandle;
+use ryx_backend::transaction::set_current_transaction;
 use ryx_common::RyxResult;
 
 /// Run a closure inside a database transaction.

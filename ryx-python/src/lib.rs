@@ -27,22 +27,20 @@ pub(crate) trait IntoPyResult<T> {
 
 impl<T> IntoPyResult<T> for Result<T, RyxError> {
     fn into_py(self) -> PyResult<T> {
-        self.map_err(|e| {
-            match e {
-                RyxError::Query(qe) => match qe {
-                    QueryError::UnknownLookup { .. }
-                    | QueryError::UnknownField { .. }
-                    | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
-                    QueryError::UnsupportedBackend { .. } => {
-                        PyNotImplementedError::new_err(qe.to_string())
-                    }
-                    QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
-                },
-                RyxError::DatabaseWithSql(sql, e) => {
-                    PyRuntimeError::new_err(format!("Database error: {e} (sql: {sql})"))
+        self.map_err(|e| match e {
+            RyxError::Query(qe) => match qe {
+                QueryError::UnknownLookup { .. }
+                | QueryError::UnknownField { .. }
+                | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
+                QueryError::UnsupportedBackend { .. } => {
+                    PyNotImplementedError::new_err(qe.to_string())
                 }
-                other => PyRuntimeError::new_err(other.to_string()),
+                QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
+            },
+            RyxError::DatabaseWithSql(sql, e) => {
+                PyRuntimeError::new_err(format!("Database error: {e} (sql: {sql})"))
             }
+            other => PyRuntimeError::new_err(other.to_string()),
         })
     }
 }
@@ -56,9 +54,7 @@ pub(crate) fn err_to_py(err: impl Into<RyxError>) -> PyErr {
             QueryError::UnknownLookup { .. }
             | QueryError::UnknownField { .. }
             | QueryError::TypeMismatch { .. } => PyValueError::new_err(qe.to_string()),
-            QueryError::UnsupportedBackend { .. } => {
-                PyNotImplementedError::new_err(qe.to_string())
-            }
+            QueryError::UnsupportedBackend { .. } => PyNotImplementedError::new_err(qe.to_string()),
             QueryError::Internal(_) => PyRuntimeError::new_err(qe.to_string()),
         },
         RyxError::DatabaseWithSql(sql, e) => {
@@ -116,14 +112,12 @@ fn setup<'py>(
 
 #[pyfunction]
 fn register_lookup(name: String, sql_template: String) -> PyResult<()> {
-    lookups::register_custom(name, sql_template)
-        .map_err(err_to_py)
+    lookups::register_custom(name, sql_template).map_err(err_to_py)
 }
 
 #[pyfunction]
 fn available_lookups() -> PyResult<Vec<String>> {
-    lookups::registered_lookups()
-        .map_err(err_to_py)
+    lookups::registered_lookups().map_err(err_to_py)
 }
 
 #[pyfunction]
@@ -1019,7 +1013,15 @@ fn bulk_update<'py>(
         // Get appropriate backend for the query based on the node's db_alias (if set) or default
         let b = pool::get(alias.as_deref()).into_py()?;
         let result = b
-            .bulk_update(table, pk_col, columns, rust_field_values, pk_values, alias, schema.unwrap_or_default())
+            .bulk_update(
+                table,
+                pk_col,
+                columns,
+                rust_field_values,
+                pk_values,
+                alias,
+                schema.unwrap_or_default(),
+            )
             .await
             .map_err(err_to_py)?;
         Python::attach(|py| {

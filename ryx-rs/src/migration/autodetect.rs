@@ -1,8 +1,10 @@
 use std::path::Path;
 
-use crate::migration::files::{discover_migration_files, load_migration_file, write_migration_file};
+use crate::migration::files::{
+    discover_migration_files, load_migration_file, write_migration_file,
+};
 use crate::migration::operations::{Operation, SerializedColumn};
-use crate::migration::{diff_states, ColumnState, SchemaChange, SchemaState, TableState};
+use crate::migration::{ColumnState, SchemaChange, SchemaState, TableState, diff_states};
 
 /// Describes one model known to the autodetector.
 #[derive(Clone)]
@@ -164,10 +166,8 @@ impl Autodetector {
                         .iter_mut()
                         .find(|t| t.name == *table_name && t.schema == *schema)
                     {
-                        if let Some(col) = table
-                            .columns
-                            .iter_mut()
-                            .find(|c| c.name == old_column.name)
+                        if let Some(col) =
+                            table.columns.iter_mut().find(|c| c.name == old_column.name)
                         {
                             col.db_type = new_column.db_type.clone();
                             col.nullable = new_column.nullable;

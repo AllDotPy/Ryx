@@ -4,8 +4,8 @@ use pyo3::types::{PyAny, PyList, PyTuple};
 
 use ryx_backend::pool as ryx_pool;
 use ryx_backend::query::{
-    AggFunc, AggregateExpr, DistanceOperator, FilterNode, JoinClause, JoinKind, NearestNeighborClause,
-    OrderByClause, QueryNode, QueryOperation, SqlValue, Symbol,
+    AggFunc, AggregateExpr, DistanceOperator, FilterNode, JoinClause, JoinKind,
+    NearestNeighborClause, OrderByClause, QueryNode, QueryOperation, SqlValue, Symbol,
 };
 
 use std::sync::Arc;
@@ -198,7 +198,7 @@ pub fn build_plan<'py>(
                     other => {
                         return Err(pyo3::exceptions::PyValueError::new_err(format!(
                             "Invalid distance operator '{other}'. Choose from: <->, <=>, <#>"
-                        )))
+                        )));
                     }
                 };
                 let limit = if tag == "nearest_neighbor" {

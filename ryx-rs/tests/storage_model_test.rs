@@ -1,8 +1,8 @@
 //! Integration test: `StoredFile` inside a `#[model]` (macro + storage).
 
+use ryx_rs::into_sql::IntoSqlValue;
 use ryx_rs::model;
 use ryx_rs::storage::{InMemoryStorage, StoredFile};
-use ryx_rs::into_sql::IntoSqlValue;
 use ryx_rs::{Model, SqlValue};
 
 #[model]
@@ -35,7 +35,9 @@ fn test_stored_file_into_sql_value() {
 #[tokio::test]
 async fn test_stored_file_through_storage() {
     let storage = InMemoryStorage::new();
-    let sf = StoredFile::save(&storage, "media/x.bin", b"BIN").await.unwrap();
+    let sf = StoredFile::save(&storage, "media/x.bin", b"BIN")
+        .await
+        .unwrap();
     assert_eq!(sf.name(), "media/x.bin");
     assert_eq!(sf.open(&storage).await.unwrap(), b"BIN");
     assert_eq!(sf.url(&storage), "/media/media/x.bin");

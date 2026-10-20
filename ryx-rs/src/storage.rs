@@ -12,17 +12,17 @@
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use ryx_common::{RyxError, RyxResult};
 use tokio::sync::RwLock;
 
-// 
+//
 // Storage trait
-// 
+//
 
 /// A pluggable file storage backend.
 ///
@@ -94,9 +94,9 @@ pub trait Storage: Send + Sync {
     }
 }
 
-// 
+//
 // Helpers
-// 
+//
 
 /// Split a name into `(stem, extension)` where extension includes the dot.
 fn split_name(name: &str) -> (String, String) {
@@ -140,9 +140,9 @@ fn validate_relative(name: &str) -> RyxResult<()> {
     Ok(())
 }
 
-// 
+//
 // Local filesystem storage (default)
-// 
+//
 
 /// Filesystem-backed storage rooted at `root`.
 ///
@@ -257,9 +257,9 @@ impl Storage for LocalStorage {
     }
 }
 
-// 
+//
 // In-memory storage (tests / ephemeral)
-// 
+//
 
 /// An in-memory storage backend. Useful for tests.
 pub struct InMemoryStorage {
@@ -350,9 +350,9 @@ impl Storage for InMemoryStorage {
     }
 }
 
-// 
+//
 // Global storage registry
-// 
+//
 
 static GLOBAL_STORAGE: once_cell::sync::OnceCell<RwLock<Option<Arc<dyn Storage>>>> =
     once_cell::sync::OnceCell::new();
@@ -385,9 +385,9 @@ pub fn clear_storage() {
     }
 }
 
-// 
+//
 // StoredFile — a value stored via a Storage backend
-// 
+//
 
 /// A reference to a file stored via a [`Storage`] backend.
 ///
@@ -418,11 +418,7 @@ impl StoredFile {
     }
 
     /// Save `content` via `storage` and return the resulting [`StoredFile`].
-    pub async fn save(
-        storage: &dyn Storage,
-        name: &str,
-        content: &[u8],
-    ) -> RyxResult<Self> {
+    pub async fn save(storage: &dyn Storage, name: &str, content: &[u8]) -> RyxResult<Self> {
         Ok(Self(storage.save(name, content).await?))
     }
 
@@ -477,9 +473,9 @@ impl std::str::FromStr for StoredFile {
     }
 }
 
-// 
+//
 // Tests
-// 
+//
 
 #[cfg(test)]
 mod tests {
@@ -568,7 +564,9 @@ mod tests {
     #[tokio::test]
     async fn test_stored_file_roundtrip() {
         let s = InMemoryStorage::new();
-        let sf = StoredFile::save(&s, "docs/report.pdf", b"PDF").await.unwrap();
+        let sf = StoredFile::save(&s, "docs/report.pdf", b"PDF")
+            .await
+            .unwrap();
         assert_eq!(sf.name(), "docs/report.pdf");
         assert_eq!(sf.open(&s).await.unwrap(), b"PDF");
         assert!(sf.exists(&s).await.unwrap());

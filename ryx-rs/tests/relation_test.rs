@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use ryx_rs::PoolConfig;
 use ryx_rs::migration::MigrationRunner;
 use ryx_rs::model;
 use ryx_rs::model::Relationships;
-use ryx_rs::PoolConfig;
 
 // ── Models ─────────────────────────────────────────────────────
 
@@ -36,11 +36,14 @@ async fn init_pool() {
     ryx_query::lookups::init_registry();
     let mut urls = HashMap::new();
     urls.insert("default".into(), "sqlite:relation_test.db?mode=rwc".into());
-    ryx_backend::pool::initialize(urls, PoolConfig {
-        max_connections: 1,
-        min_connections: 1,
-        ..Default::default()
-    })
+    ryx_backend::pool::initialize(
+        urls,
+        PoolConfig {
+            max_connections: 1,
+            min_connections: 1,
+            ..Default::default()
+        },
+    )
     .await
     .expect("init pool");
 }
@@ -51,7 +54,7 @@ async fn init_pool() {
 fn test_relation_metadata() {
     let rels = <RelPost as Relationships>::relations();
     assert_eq!(rels.len(), 1);
-    assert_eq!(rels[0].name, "author");        // from name= attribute
+    assert_eq!(rels[0].name, "author"); // from name= attribute
     assert_eq!(rels[0].fk_column, "author_id");
     assert_eq!(rels[0].to_table, "rel_authors");
     assert_eq!(rels[0].to_field, "id");
@@ -82,7 +85,10 @@ async fn test_select_related_basic() {
     // Seed data
     let backend = ryx_backend::pool::get(None).unwrap();
     backend
-        .execute_raw("INSERT INTO rel_authors (name) VALUES ('Alice')".into(), None)
+        .execute_raw(
+            "INSERT INTO rel_authors (name) VALUES ('Alice')".into(),
+            None,
+        )
         .await
         .unwrap();
     backend
@@ -90,15 +96,24 @@ async fn test_select_related_basic() {
         .await
         .unwrap();
     backend
-        .execute_raw("INSERT INTO rel_posts (title, author_id) VALUES ('Post 1', 1)".into(), None)
+        .execute_raw(
+            "INSERT INTO rel_posts (title, author_id) VALUES ('Post 1', 1)".into(),
+            None,
+        )
         .await
         .unwrap();
     backend
-        .execute_raw("INSERT INTO rel_posts (title, author_id) VALUES ('Post 2', 1)".into(), None)
+        .execute_raw(
+            "INSERT INTO rel_posts (title, author_id) VALUES ('Post 2', 1)".into(),
+            None,
+        )
         .await
         .unwrap();
     backend
-        .execute_raw("INSERT INTO rel_posts (title, author_id) VALUES ('Post 3', 2)".into(), None)
+        .execute_raw(
+            "INSERT INTO rel_posts (title, author_id) VALUES ('Post 3', 2)".into(),
+            None,
+        )
         .await
         .unwrap();
 

@@ -514,7 +514,7 @@ impl RyxBackend for SqliteBackend {
         }
 
         let row_ph = format!("({})", placeholders.join(", "));
-        
+
         let mut values_sql_parts = Vec::with_capacity(rows.len());
 
         values_sql_parts = std::iter::repeat(row_ph.clone()).take(rows.len()).collect();
