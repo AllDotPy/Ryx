@@ -35,8 +35,8 @@ use ryx_query::Backend;
 use crate::backends::{
     RyxBackend, mysql::MySqlBackend, postgres::PostgresBackend, sqlite::SqliteBackend,
 };
-use ryx_common::errors::{RyxError, RyxResult};
 pub use ryx_common::PoolConfig;
+use ryx_common::errors::{RyxError, RyxResult};
 
 fn to_static<T: sqlx::Database>(tx: sqlx::Transaction<'_, T>) -> sqlx::Transaction<'static, T> {
     // SAFETY: transactions are tied to the process-lifetime pool. Extending the

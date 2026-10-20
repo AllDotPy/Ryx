@@ -5,8 +5,8 @@ use ryx_backend::backends::DecodedRow;
 use ryx_backend::pool;
 use ryx_common::{RyxResult, SqlValue};
 use ryx_query::ast::{
-    DistanceOperator, FilterNode, JoinClause, JoinKind, NearestNeighborClause, OrderByClause, QNode,
-    QueryNode, QueryOperation,
+    DistanceOperator, FilterNode, JoinClause, JoinKind, NearestNeighborClause, OrderByClause,
+    QNode, QueryNode, QueryOperation,
 };
 use ryx_query::compiler;
 use ryx_query::symbols::Symbol;
@@ -14,9 +14,9 @@ use ryx_query::symbols::Symbol;
 use crate::agg::AggExpr;
 use crate::cache::CachedQuerySet;
 use crate::into_sql::IntoSqlValue;
-use crate::stream::QueryStream;
-use crate::q::{parse_field_lookup, q_to_qnode, Q};
+use crate::q::{Q, parse_field_lookup, q_to_qnode};
 use crate::row::FromRow;
+use crate::stream::QueryStream;
 
 pub enum FilterArg {
     Field {
@@ -58,7 +58,7 @@ impl<T: FromRow> QuerySet<T> {
         }
     }
 
-    //  DATABASE ROUTING 
+    //  DATABASE ROUTING
 
     /// Route this query to a specific database alias.
     ///
@@ -80,7 +80,7 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
-    //  FILTERS 
+    //  FILTERS
 
     /// Add a filter condition.
     ///
@@ -137,7 +137,7 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
-    //  ORDERING 
+    //  ORDERING
 
     pub fn order_by(mut self, field: &str) -> Self {
         self.node = self.node.with_order_by(OrderByClause::parse(field));
@@ -151,7 +151,7 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
-    //  NEAREST NEIGHBOR (pgvector, PostgreSQL) 
+    //  NEAREST NEIGHBOR (pgvector, PostgreSQL)
 
     /// Order rows by distance to `vector` (K-NN). Combine with `.limit(k)`.
     ///
@@ -199,7 +199,7 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
-    //  PAGINATION 
+    //  PAGINATION
 
     pub fn limit(mut self, n: u64) -> Self {
         self.node = self.node.with_limit(n);
@@ -216,7 +216,7 @@ impl<T: FromRow> QuerySet<T> {
         self
     }
 
-    //  EXECUTION — SELECT 
+    //  EXECUTION — SELECT
 
     /// Fetch raw decoded rows (before FromRow mapping).
     /// Used internally by `.all()` and by `CachedQuerySet`.
@@ -269,7 +269,7 @@ impl<T: FromRow> QuerySet<T> {
         self.count().await.map(|c| c > 0)
     }
 
-    //  EXECUTION — DELETE 
+    //  EXECUTION — DELETE
 
     pub async fn delete(self) -> RyxResult<u64> {
         let mut del_node = self.node.clone();
@@ -279,7 +279,7 @@ impl<T: FromRow> QuerySet<T> {
         Ok(res.rows_affected)
     }
 
-    //  EXECUTION — UPDATE 
+    //  EXECUTION — UPDATE
 
     /// Update matching rows.
     ///
@@ -305,7 +305,7 @@ impl<T: FromRow> QuerySet<T> {
         Ok(res.rows_affected)
     }
 
-    //  CACHING 
+    //  CACHING
 
     /// Enable caching for this query.
     ///
@@ -328,7 +328,7 @@ impl<T: FromRow> QuerySet<T> {
         }
     }
 
-    //  STREAMING 
+    //  STREAMING
 
     /// Create a streaming paginator for this query.
     ///
@@ -346,14 +346,14 @@ impl<T: FromRow> QuerySet<T> {
         QueryStream::new(self, chunk_size, keyset)
     }
 
-    //  COMPILED SQL (debug) 
+    //  COMPILED SQL (debug)
 
     pub fn sql(&self) -> RyxResult<String> {
         let compiled = compiler::compile(&self.node)?;
         Ok(compiled.sql)
     }
 
-    //  AGGREGATION 
+    //  AGGREGATION
 
     /// Execute an aggregate query and return a single row of results.
     ///
@@ -387,7 +387,7 @@ impl<T: FromRow> QuerySet<T> {
         Ok(map)
     }
 
-    //  COLUMN SELECTION 
+    //  COLUMN SELECTION
 
     /// Run the query and return rows as maps of column name → value.
     ///
@@ -431,14 +431,11 @@ impl<T: FromRow> QuerySet<T> {
         let b = pool::get(node.db_alias.as_deref())?;
         let compiled = compiler::compile(&node)?;
         let rows = b.fetch_all(compiled).await?;
-        let result = rows
-            .iter()
-            .map(|row| row.values.clone())
-            .collect();
+        let result = rows.iter().map(|row| row.values.clone()).collect();
         Ok(result)
     }
 
-    //  ANNOTATE 
+    //  ANNOTATE
 
     /// Annotate each row with computed values (aggregates, expressions).
     ///
@@ -478,7 +475,7 @@ impl<T: FromRow> QuerySet<T> {
     }
 }
 
-//  JOIN / SELECT_RELATED (requires Relationships trait) 
+//  JOIN / SELECT_RELATED (requires Relationships trait)
 
 impl<T: FromRow + crate::model::Relationships> QuerySet<T> {
     /// Fetch related models via LEFT OUTER JOIN.

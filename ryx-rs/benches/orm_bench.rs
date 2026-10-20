@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use ryx_common::PoolConfig;
-use ryx_query::ast::SqlValue;
 use ryx_query::Backend;
+use ryx_query::ast::SqlValue;
 use tokio::runtime::Runtime;
 
 static RT: OnceLock<Runtime> = OnceLock::new();
@@ -438,7 +438,15 @@ fn bench_row_to_hashmap(c: &mut Criterion) {
     c.bench_function("row_to_hashmap_7_fields", |b| {
         b.iter(|| {
             let mut map = std::collections::HashMap::new();
-            for col in ["id", "title", "content", "author", "views", "published", "created_at"] {
+            for col in [
+                "id",
+                "title",
+                "content",
+                "author",
+                "views",
+                "published",
+                "created_at",
+            ] {
                 if let Some(val) = row.get(col) {
                     map.insert(col.to_string(), val.clone());
                 }

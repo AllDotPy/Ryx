@@ -26,14 +26,17 @@ format = "YAML"
     let config: ryx_rs::RyxConfig = toml::from_str(toml_str).expect("TOML parse");
     assert_eq!(config.urls.len(), 3);
     assert_eq!(config.urls.get("default").unwrap(), "sqlite::memory:");
-    assert_eq!(config.urls.get("replica").unwrap(), "postgres://user:pass@localhost:5432/db");
+    assert_eq!(
+        config.urls.get("replica").unwrap(),
+        "postgres://user:pass@localhost:5432/db"
+    );
     assert_eq!(config.urls.get("logs").unwrap(), "sqlite:///tmp/logs.db");
 
     assert_eq!(config.pool.max_conn, Some(12));
     assert_eq!(config.pool.min_conn, Some(2));
     assert_eq!(config.pool.connect_timeout, Some(15));
     assert_eq!(config.pool.idle_timeout, None); // not specified → None (not default)
-    assert_eq!(config.pool.max_lifetime, None);  // not specified → None
+    assert_eq!(config.pool.max_lifetime, None); // not specified → None
 
     assert_eq!(config.migrations.dirs, vec!["db/migrations/"]);
     assert_eq!(config.migrations.format.as_deref(), Some("YAML"));
@@ -129,11 +132,17 @@ fn test_config_env_overrides() {
     let config = ryx_rs::RyxConfig::load();
 
     // Default URL — env fills gap since no file/default URL exists
-    assert_eq!(config.urls.get("default").unwrap(), "sqlite:///env_default.db");
+    assert_eq!(
+        config.urls.get("default").unwrap(),
+        "sqlite:///env_default.db"
+    );
 
     // Per-alias URLs (Python convention: RYX_DB_<ALIAS>_URL)
     assert_eq!(config.urls.get("logs").unwrap(), "sqlite:///env_logs.db");
-    assert_eq!(config.urls.get("replica").unwrap(), "postgres://env_replica/db");
+    assert_eq!(
+        config.urls.get("replica").unwrap(),
+        "postgres://env_replica/db"
+    );
 
     // Pool overrides (defaults are None; env fills gaps)
     assert_eq!(config.pool.max_conn, Some(20));
@@ -186,7 +195,10 @@ max_conn = 5
     let config = ryx_rs::RyxConfig::load_from_dir(dir);
 
     // File values take precedence over env vars (matching Python _auto_setup())
-    assert_eq!(config.urls.get("default").unwrap(), "sqlite:///file_default.db");
+    assert_eq!(
+        config.urls.get("default").unwrap(),
+        "sqlite:///file_default.db"
+    );
     assert_eq!(config.urls.get("logs").unwrap(), "sqlite:///file_logs.db");
     assert_eq!(config.pool.max_conn, Some(5));
 
@@ -235,10 +247,11 @@ async fn test_config_init_pool() {
 #[test]
 fn test_config_empty_dir() {
     let _lock = ENV_LOCK.lock().unwrap();
-    let ryx_vars: Vec<(&str, Option<String>)> = ["RYX_DATABASE_URL", "RYX_DB_LOGS_URL", "RYX_DB_REPLICA_URL"]
-        .iter()
-        .map(|k| (*k, std::env::var(k).ok()))
-        .collect();
+    let ryx_vars: Vec<(&str, Option<String>)> =
+        ["RYX_DATABASE_URL", "RYX_DB_LOGS_URL", "RYX_DB_REPLICA_URL"]
+            .iter()
+            .map(|k| (*k, std::env::var(k).ok()))
+            .collect();
     for (k, _) in &ryx_vars {
         unsafe { std::env::remove_var(k) };
     }

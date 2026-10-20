@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use ryx_rs::PoolConfig;
 use ryx_rs::migration::MigrationRunner;
 use ryx_rs::model;
-use ryx_rs::PoolConfig;
 
 // ── Model definitions ──────────────────────────────────────────
 
@@ -45,11 +45,14 @@ async fn init_pool() {
 
     let mut urls = HashMap::new();
     urls.insert("default".into(), "sqlite:test_rs.db?mode=rwc".into());
-    ryx_backend::pool::initialize(urls, PoolConfig {
-        max_connections: 1,
-        min_connections: 1,
-        ..Default::default()
-    })
+    ryx_backend::pool::initialize(
+        urls,
+        PoolConfig {
+            max_connections: 1,
+            min_connections: 1,
+            ..Default::default()
+        },
+    )
     .await
     .expect("Failed to init SQLite pool");
 }
@@ -90,11 +93,17 @@ async fn sequential_migration_tests() {
     {
         let backend = ryx_backend::pool::get(None).unwrap();
         backend
-            .fetch_raw("CREATE TABLE IF NOT EXISTS test_foo (id INTEGER PRIMARY KEY)".into(), None)
+            .fetch_raw(
+                "CREATE TABLE IF NOT EXISTS test_foo (id INTEGER PRIMARY KEY)".into(),
+                None,
+            )
             .await
             .expect("Direct table creation should work");
         let rows = backend
-            .fetch_raw("SELECT name FROM sqlite_master WHERE type='table' AND name='test_foo'".into(), None)
+            .fetch_raw(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='test_foo'".into(),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(rows.len(), 1, "test_foo should exist after direct CREATE");
@@ -151,5 +160,8 @@ async fn sequential_migration_tests() {
         .plan()
         .await
         .expect("Plan");
-    assert!(ddl.is_empty(), "Plan should be empty when schema is current");
+    assert!(
+        ddl.is_empty(),
+        "Plan should be empty when schema is current"
+    );
 }

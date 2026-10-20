@@ -16,7 +16,7 @@ pub mod transaction;
 use std::sync::OnceLock;
 
 // Re-export key traits and types for convenience
-pub use config::{is_initialized, RyxConfig, PoolConfigSection, MigrationsConfig, StorageConfig};
+pub use config::{MigrationsConfig, PoolConfigSection, RyxConfig, StorageConfig, is_initialized};
 pub use model::{FieldMeta, Model, RelationMeta, Relationships};
 pub use objects::{InsertBuilder, ObjectsManager};
 pub use q::Q;
@@ -26,8 +26,8 @@ pub use transaction::transaction;
 
 // Re-export file storage types
 pub use storage::{
-    clear_storage, configure_storage, get_storage, InMemoryStorage, LocalStorage, Storage,
-    StoredFile,
+    InMemoryStorage, LocalStorage, Storage, StoredFile, clear_storage, configure_storage,
+    get_storage,
 };
 
 /// Initialize the global `tracing` subscriber from `RYX_LOG_LEVEL`.
@@ -37,8 +37,7 @@ pub use storage::{
 pub fn init_tracing() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
-        let level =
-            std::env::var("RYX_LOG_LEVEL").unwrap_or_default();
+        let level = std::env::var("RYX_LOG_LEVEL").unwrap_or_default();
         if level.is_empty() {
             return;
         }

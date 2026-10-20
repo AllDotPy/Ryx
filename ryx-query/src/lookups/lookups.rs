@@ -125,12 +125,7 @@ pub fn register_custom(
     let name = name.into();
     let sql_template = sql_template.into();
     debug!("Register custom lookup: {} = {}", name, sql_template);
-    guard.custom.insert(
-        name,
-        PythonLookup {
-            sql_template,
-        },
-    );
+    guard.custom.insert(name, PythonLookup { sql_template });
 
     Ok(())
 }

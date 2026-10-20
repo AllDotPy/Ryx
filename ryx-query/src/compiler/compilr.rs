@@ -17,12 +17,12 @@ use crate::lookups::date_lookups as date;
 use crate::lookups::json_lookups as json;
 use crate::lookups::{self, LookupContext};
 use crate::symbols::{GLOBAL_INTERNER, Symbol};
-use tracing::debug;
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use smallvec::SmallVec;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use tracing::debug;
 
 use super::helpers;
 pub use super::helpers::{KNOWN_TRANSFORMS, apply_like_wrapping, qualified_col, split_qualified};
@@ -567,7 +567,12 @@ fn write_table_ref(node: &QueryNode, writer: &mut SqlWriter) {
 }
 
 /// Write a schema-qualified join table reference.
-fn write_join_table_ref(table: Symbol, schema: Option<Symbol>, backend: Backend, writer: &mut SqlWriter) {
+fn write_join_table_ref(
+    table: Symbol,
+    schema: Option<Symbol>,
+    backend: Backend,
+    writer: &mut SqlWriter,
+) {
     let table_str = GLOBAL_INTERNER.resolve(table);
     match schema {
         Some(sym) if backend.supports_schemas() => {
@@ -1109,15 +1114,22 @@ mod tests {
     #[test]
     fn test_select_with_schema() {
         let q = compile(&schema_node()).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "SELECT FROM should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "SELECT FROM should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
     fn test_select_no_schema() {
         init_registry();
         let q = compile(&QueryNode::select("posts")).unwrap();
-        assert!(!q.sql.contains('.'), "No schema should not qualify: {}", q.sql);
+        assert!(
+            !q.sql.contains('.'),
+            "No schema should not qualify: {}",
+            q.sql
+        );
         assert!(q.sql.contains(r#""posts""#));
     }
 
@@ -1126,8 +1138,11 @@ mod tests {
         let mut node = schema_node();
         node.operation = QueryOperation::Count;
         let q = compile(&node).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "COUNT FROM should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "COUNT FROM should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1135,8 +1150,11 @@ mod tests {
         let mut node = schema_node();
         node.operation = QueryOperation::Delete;
         let q = compile(&node).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "DELETE FROM should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "DELETE FROM should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1146,8 +1164,11 @@ mod tests {
             assignments: vec![("title".into(), SqlValue::Text("hello".into()))],
         };
         let q = compile(&node).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "UPDATE should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "UPDATE should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1158,8 +1179,11 @@ mod tests {
             returning_id: true,
         };
         let q = compile(&node).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "INSERT INTO should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "INSERT INTO should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1172,10 +1196,16 @@ mod tests {
             on_right: "a.id".into(),
         });
         let q = compile(&node).unwrap();
-        assert!(q.sql.contains(r#""tenant1"."posts""#),
-            "Main table should be schema-qualified: {}", q.sql);
-        assert!(q.sql.contains(r#""tenant1"."authors""#),
-            "Join table should be schema-qualified: {}", q.sql);
+        assert!(
+            q.sql.contains(r#""tenant1"."posts""#),
+            "Main table should be schema-qualified: {}",
+            q.sql
+        );
+        assert!(
+            q.sql.contains(r#""tenant1"."authors""#),
+            "Join table should be schema-qualified: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1185,8 +1215,11 @@ mod tests {
             .with_schema("tenant1")
             .with_backend(Backend::MySQL);
         let q = compile(&node).unwrap();
-        assert!(!q.sql.contains("tenant1"),
-            "MySQL should not schema-qualify: {}", q.sql);
+        assert!(
+            !q.sql.contains("tenant1"),
+            "MySQL should not schema-qualify: {}",
+            q.sql
+        );
     }
 
     #[test]
@@ -1196,15 +1229,18 @@ mod tests {
             .with_schema("tenant1")
             .with_backend(Backend::SQLite);
         let q = compile(&node).unwrap();
-        assert!(!q.sql.contains("tenant1"),
-            "SQLite should not schema-qualify: {}", q.sql);
+        assert!(
+            !q.sql.contains("tenant1"),
+            "SQLite should not schema-qualify: {}",
+            q.sql
+        );
     }
 
     #[test]
     fn test_schema_in_plan_hash() {
         init_registry();
         // Same query, different schemas should produce different plan hashes
-        use std::hash::{Hash, Hasher, DefaultHasher};
+        use std::hash::{DefaultHasher, Hash, Hasher};
 
         fn plan_hash_for(node: &QueryNode) -> u64 {
             let mut h = DefaultHasher::new();
@@ -1218,10 +1254,16 @@ mod tests {
         let n2 = QueryNode::select("posts").with_schema("tenant2");
         let n3 = QueryNode::select("posts"); // no schema
 
-        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n2),
-            "Different schemas must produce different plan hashes");
-        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n3),
-            "Schema vs no-schema must produce different plan hashes");
+        assert_ne!(
+            plan_hash_for(&n1),
+            plan_hash_for(&n2),
+            "Different schemas must produce different plan hashes"
+        );
+        assert_ne!(
+            plan_hash_for(&n1),
+            plan_hash_for(&n3),
+            "Schema vs no-schema must produce different plan hashes"
+        );
     }
 
     // ── Nearest-neighbor (pgvector) tests ─────────────────
@@ -1297,16 +1339,15 @@ mod tests {
 
     #[test]
     fn test_nearest_neighbor_non_pg_errors() {
-        let node = nn_node(crate::ast::DistanceOperator::L2, Some(5))
-            .with_backend(Backend::SQLite);
+        let node = nn_node(crate::ast::DistanceOperator::L2, Some(5)).with_backend(Backend::SQLite);
         let err = compile(&node).unwrap_err();
         assert!(
             matches!(err, QueryError::UnsupportedBackend { ref backend, .. } if backend == "sqlite"),
             "expected UnsupportedBackend, got: {err}"
         );
 
-        let node = nn_node(crate::ast::DistanceOperator::Cosine, Some(5))
-            .with_backend(Backend::MySQL);
+        let node =
+            nn_node(crate::ast::DistanceOperator::Cosine, Some(5)).with_backend(Backend::MySQL);
         let err = compile(&node).unwrap_err();
         assert!(
             matches!(err, QueryError::UnsupportedBackend { .. }),
@@ -1317,7 +1358,7 @@ mod tests {
     #[test]
     fn test_nearest_neighbor_in_plan_hash() {
         init_registry();
-        use std::hash::{Hash, Hasher, DefaultHasher};
+        use std::hash::{DefaultHasher, Hash, Hasher};
 
         fn plan_hash_for(node: &QueryNode) -> u64 {
             let mut h = DefaultHasher::new();
@@ -1334,9 +1375,15 @@ mod tests {
         let n2 = nn_node(crate::ast::DistanceOperator::Cosine, Some(5));
         let n3 = QueryNode::select("items"); // no K-NN
 
-        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n2),
-            "Different operators must produce different plan hashes");
-        assert_ne!(plan_hash_for(&n1), plan_hash_for(&n3),
-            "K-NN vs no-K-NN must produce different plan hashes");
+        assert_ne!(
+            plan_hash_for(&n1),
+            plan_hash_for(&n2),
+            "Different operators must produce different plan hashes"
+        );
+        assert_ne!(
+            plan_hash_for(&n1),
+            plan_hash_for(&n3),
+            "K-NN vs no-K-NN must produce different plan hashes"
+        );
     }
 }

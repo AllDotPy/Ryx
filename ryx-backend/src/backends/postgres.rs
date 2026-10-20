@@ -142,7 +142,10 @@ impl PostgresBackend {
     /// We only cast INSERT/UPDATE assignment parameters where we know the exact
     /// column names; all other placeholders fall back to a lightweight heuristic
     /// so we preserve previous behaviour for filters.
-    pub(crate) fn postgres_placeholder_cast(idx: usize, query: &CompiledQuery) -> Option<&'static str> {
+    pub(crate) fn postgres_placeholder_cast(
+        idx: usize,
+        query: &CompiledQuery,
+    ) -> Option<&'static str> {
         // If we have column names (INSERT or UPDATE) and a base table, look up the
         // field in the registry to get an authoritative type.
         if let (Some(cols), Some(table)) = (&query.column_names, &query.base_table) {

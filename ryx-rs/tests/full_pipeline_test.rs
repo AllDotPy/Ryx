@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-use ryx_rs::migration::MigrationRunner;
-use ryx_rs::model;
 use ryx_rs::PoolConfig;
 use ryx_rs::Q;
+use ryx_rs::migration::MigrationRunner;
+use ryx_rs::model;
 
 // ── Model definitions ─────────────────────────────────────
 
@@ -40,11 +40,14 @@ async fn init_pool(db_name: &str) {
 
     let mut urls = HashMap::new();
     urls.insert("default".into(), format!("sqlite:{db_name}?mode=rwc"));
-    ryx_backend::pool::initialize(urls, PoolConfig {
-        max_connections: 1,
-        min_connections: 1,
-        ..Default::default()
-    })
+    ryx_backend::pool::initialize(
+        urls,
+        PoolConfig {
+            max_connections: 1,
+            min_connections: 1,
+            ..Default::default()
+        },
+    )
     .await
     .expect("Failed to init SQLite pool");
 }
@@ -263,7 +266,7 @@ async fn full_pipeline_test() {
 
     // 15. QuerySet .aggregate()
     {
-        use ryx_rs::agg::{sum, count as agg_count};
+        use ryx_rs::agg::{count as agg_count, sum};
         use ryx_rs::queryset::QuerySet;
         let aggs = QuerySet::<Post>::new("pipeline_posts")
             .aggregate(&[agg_count("total", "id"), sum("total_views", "views")])
@@ -285,7 +288,10 @@ async fn full_pipeline_test() {
             .expect("annotate");
         assert!(!annotated.is_empty(), "should return annotated rows");
         for row in &annotated {
-            assert!(row.contains_key("cnt"), "each row should have cnt annotation");
+            assert!(
+                row.contains_key("cnt"),
+                "each row should have cnt annotation"
+            );
         }
     }
 

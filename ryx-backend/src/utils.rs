@@ -115,8 +115,8 @@ where
             .try_get::<bool, _>(ord)
             .map(SqlValue::Bool)
             .unwrap_or(SqlValue::Null),
-        "IntegerField" | "IntField" | "BigIntField" | "SmallIntField" | "AutoField" | "BigAutoField"
-        | "SmallAutoField" | "PositiveIntField" => {
+        "IntegerField" | "IntField" | "BigIntField" | "SmallIntField" | "AutoField"
+        | "BigAutoField" | "SmallAutoField" | "PositiveIntField" => {
             // Tolerate integer (int4), bigint (int8) and float PK columns.
             match row.try_get::<i64, _>(ord) {
                 Ok(v) => SqlValue::Int(v),

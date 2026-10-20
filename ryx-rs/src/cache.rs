@@ -12,9 +12,9 @@ use tokio::sync::RwLock;
 use crate::queryset::QuerySet;
 use crate::row::FromRow;
 
-// 
+//
 // Cache Backend Trait
-// 
+//
 
 /// A cache storage backend.
 ///
@@ -34,9 +34,9 @@ pub trait CacheBackend: Send + Sync {
     async fn clear(&self) -> RyxResult<()>;
 }
 
-// 
+//
 // Memory Cache Backend
-// 
+//
 
 /// An in-memory cache backend with TTL support and LRU eviction.
 ///
@@ -86,7 +86,11 @@ impl CacheBackend for MemoryCache {
         let _cache_ttl = ttl.unwrap_or(self.default_ttl);
         // Evict oldest entries if over max_entries
         if map.len() >= self.max_entries && !map.contains_key(key) {
-            if let Some(oldest_key) = map.iter().min_by_key(|(_, (ts, _))| *ts).map(|(k, _)| k.clone()) {
+            if let Some(oldest_key) = map
+                .iter()
+                .min_by_key(|(_, (ts, _))| *ts)
+                .map(|(k, _)| k.clone())
+            {
                 map.remove(&oldest_key);
             }
         }
@@ -105,9 +109,9 @@ impl CacheBackend for MemoryCache {
     }
 }
 
-// 
+//
 // Redis Cache Backend
-// 
+//
 
 #[cfg(feature = "cache-redis")]
 pub mod redis_backend {
@@ -206,9 +210,9 @@ pub mod redis_backend {
     }
 }
 
-// 
+//
 // Global Cache Registry
-// 
+//
 
 static GLOBAL_CACHE: once_cell::sync::OnceCell<RwLock<Option<Arc<dyn CacheBackend>>>> =
     once_cell::sync::OnceCell::new();
@@ -228,9 +232,9 @@ pub fn configure_cache(backend: impl CacheBackend + 'static) {
     *guard = Some(Arc::new(backend));
 }
 
-// 
+//
 // Cache Key Generation
-// 
+//
 
 /// Generate a deterministic cache key from the compiled query.
 pub fn make_cache_key(model_name: &str, sql: &str, values_json: &str) -> String {
@@ -241,9 +245,9 @@ pub fn make_cache_key(model_name: &str, sql: &str, values_json: &str) -> String 
     format!("ryx:{}:{:016x}", model_name, hash)
 }
 
-// 
+//
 // Cached QuerySet
-// 
+//
 
 /// A wrapper around `QuerySet` that adds caching.
 ///
@@ -296,8 +300,8 @@ impl<T: FromRow + Send + Sync> CachedQuerySet<T> {
             .map(|r| r.mapping.columns.clone())
             .unwrap_or_default();
         let raw_data: Vec<Vec<SqlValue>> = rows.iter().map(|r| r.values.clone()).collect();
-        let cached_json =
-            serde_json::to_string(&(columns, raw_data)).map_err(|e| RyxError::Internal(e.to_string()))?;
+        let cached_json = serde_json::to_string(&(columns, raw_data))
+            .map_err(|e| RyxError::Internal(e.to_string()))?;
 
         if let Some(lock) = GLOBAL_CACHE.get() {
             let guard = lock.read().await;

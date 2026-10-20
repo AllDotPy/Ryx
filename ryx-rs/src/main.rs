@@ -2,11 +2,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
-use ryx_rs::cli::style::{cyan, fail_mark, green, magenta, ok_mark, prefix, red, warn_mark, yellow};
+use ryx_rs::RyxConfig;
+use ryx_rs::cli::style::{
+    cyan, fail_mark, green, magenta, ok_mark, prefix, red, warn_mark, yellow,
+};
 use ryx_rs::migration::ddl::DDLGenerator;
 use ryx_rs::migration::files::{discover_migration_files, load_migration_file};
-use ryx_rs::migration::runner::{operation_to_sql, FileRunner};
-use ryx_rs::RyxConfig;
+use ryx_rs::migration::runner::{FileRunner, operation_to_sql};
 
 #[derive(Parser)]
 #[command(name = "ryx", about = "Ryx ORM — command-line tool")]
@@ -86,16 +88,39 @@ async fn main() {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Migrate { dir, alias, dry_run, no_interactive, schema } => {
-            cmd_migrate(&cli, dir, alias.as_deref(), *dry_run, *no_interactive, schema.as_deref()).await;
+        Commands::Migrate {
+            dir,
+            alias,
+            dry_run,
+            no_interactive,
+            schema,
+        } => {
+            cmd_migrate(
+                &cli,
+                dir,
+                alias.as_deref(),
+                *dry_run,
+                *no_interactive,
+                schema.as_deref(),
+            )
+            .await;
         }
         Commands::Makemigrations { dir, check } => {
             cmd_makemigrations(dir, *check).await;
         }
-        Commands::Showmigrations { dir, unapplied, alias } => {
+        Commands::Showmigrations {
+            dir,
+            unapplied,
+            alias,
+        } => {
             cmd_showmigrations(&cli, dir, *unapplied, alias.as_deref()).await;
         }
-        Commands::Sqlmigrate { name, dir, backends, schema } => {
+        Commands::Sqlmigrate {
+            name,
+            dir,
+            backends,
+            schema,
+        } => {
             cmd_sqlmigrate(dir, name, backends.as_deref(), schema.as_deref());
         }
     }
@@ -133,11 +158,20 @@ async fn cmd_migrate(
                 for s in &statements {
                     println!("{s}");
                 }
-                println!("{}  {} statement(s)", prefix(), green(&statements.len().to_string()));
+                println!(
+                    "{}  {} statement(s)",
+                    prefix(),
+                    green(&statements.len().to_string())
+                );
             } else if statements.is_empty() {
                 println!("{}  {}", prefix(), yellow("Nothing to migrate"));
             } else {
-                println!("{}  {} {} applied", prefix(), ok_mark(), green(&statements.len().to_string()));
+                println!(
+                    "{}  {} {} applied",
+                    prefix(),
+                    ok_mark(),
+                    green(&statements.len().to_string())
+                );
             }
         }
         Err(e) => {
@@ -153,14 +187,22 @@ async fn cmd_makemigrations(_dir: &str, check: bool) {
     if check {
         let files = discover_migration_files(Path::new(_dir));
         if files.is_empty() {
-            println!("{}  {}", prefix(), red("Unapplied changes — no migrations yet"));
+            println!(
+                "{}  {}",
+                prefix(),
+                red("Unapplied changes — no migrations yet")
+            );
             std::process::exit(1);
         }
         println!("{}  All migrations applied", prefix());
         return;
     }
 
-    println!("{}  {} — use Python `ryx makemigrations` for now", prefix(), yellow("makemigrations"));
+    println!(
+        "{}  {} — use Python `ryx makemigrations` for now",
+        prefix(),
+        yellow("makemigrations")
+    );
 }
 
 // ── showmigrations ──────────────────────────────────────
@@ -201,7 +243,12 @@ fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>, schema: Option<
     let path = match find_migration_file(Path::new(dir), name) {
         Some(p) => p,
         None => {
-            eprintln!("{}  {} Migration not found: {}", prefix(), fail_mark(), red(name));
+            eprintln!(
+                "{}  {} Migration not found: {}",
+                prefix(),
+                fail_mark(),
+                red(name)
+            );
             std::process::exit(1);
         }
     };
@@ -224,7 +271,12 @@ fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>, schema: Option<
             "mysql" => ryx_query::Backend::MySQL,
             "sqlite" => ryx_query::Backend::SQLite,
             _ => {
-                eprintln!("{}  {} Unknown backend: {}", prefix(), warn_mark(), yellow(backend_name));
+                eprintln!(
+                    "{}  {} Unknown backend: {}",
+                    prefix(),
+                    warn_mark(),
+                    yellow(backend_name)
+                );
                 continue;
             }
         };
@@ -233,7 +285,12 @@ fn cmd_sqlmigrate(dir: &str, name: &str, backends: Option<&str>, schema: Option<
         let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
         if backend_list.len() > 1 {
-            println!("{}  SQL for {} [{}]", prefix(), cyan(fname), magenta(backend_name.trim()));
+            println!(
+                "{}  SQL for {} [{}]",
+                prefix(),
+                cyan(fname),
+                magenta(backend_name.trim())
+            );
         } else {
             println!("{}  SQL for {}", prefix(), cyan(fname));
         }
@@ -274,7 +331,10 @@ async fn load_applied(alias: &str) -> Vec<String> {
         Err(_) => return vec![],
     };
 
-    let rows = match pool.fetch_raw("SELECT name FROM \"ryx_migrations\"".into(), None).await {
+    let rows = match pool
+        .fetch_raw("SELECT name FROM \"ryx_migrations\"".into(), None)
+        .await
+    {
         Ok(r) => r,
         Err(_) => return vec![],
     };

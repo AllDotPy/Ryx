@@ -8,8 +8,8 @@ use crate::migration::ddl::DDLGenerator;
 use crate::migration::files::{discover_migration_files, load_migration_file};
 use crate::migration::operations::Operation;
 use crate::migration::{
-    diff_states, generate_ddl, get_text, introspect_schema, ColumnState, SchemaState, TableState,
-    MIGRATIONS_TABLE,
+    ColumnState, MIGRATIONS_TABLE, SchemaState, TableState, diff_states, generate_ddl, get_text,
+    introspect_schema,
 };
 
 /// File-based migration runner with per-alias tracking and live fallback.
@@ -118,7 +118,10 @@ impl FileRunner {
     // ── Public API ──────────────────────────────────────
 
     pub async fn run(self) -> RyxResult<Vec<String>> {
-        let alias = self.db_alias.clone().unwrap_or_else(|| "default".to_string());
+        let alias = self
+            .db_alias
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
         self.ensure_tracking_table(&alias).await?;
 
         if self.live {
@@ -136,7 +139,10 @@ impl FileRunner {
     }
 
     pub async fn plan(self) -> RyxResult<Vec<String>> {
-        let alias = self.db_alias.clone().unwrap_or_else(|| "default".to_string());
+        let alias = self
+            .db_alias
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
 
         if self.live {
             return self.plan_live(&alias).await;
@@ -198,11 +204,7 @@ impl FileRunner {
 
     // ── File pipeline ───────────────────────────────────
 
-    async fn apply_files(
-        &self,
-        alias: &str,
-        files: &[PathBuf],
-    ) -> RyxResult<Vec<String>> {
+    async fn apply_files(&self, alias: &str, files: &[PathBuf]) -> RyxResult<Vec<String>> {
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
         let base_ddl = if self.schema.is_empty() {
@@ -256,11 +258,7 @@ impl FileRunner {
         Ok(results)
     }
 
-    async fn plan_files(
-        &self,
-        alias: &str,
-        files: &[PathBuf],
-    ) -> RyxResult<Vec<String>> {
+    async fn plan_files(&self, alias: &str, files: &[PathBuf]) -> RyxResult<Vec<String>> {
         let pool = ryx_backend::pool::get(Some(alias))?;
         let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
         let base_ddl = if self.schema.is_empty() {
@@ -373,9 +371,7 @@ impl FileRunner {
         changes: &[crate::migration::SchemaChange],
     ) -> RyxResult<Vec<String>> {
         println!();
-        println!(
-            "[ryx] No migration files exist for database '{alias}'"
-        );
+        println!("[ryx] No migration files exist for database '{alias}'");
         println!("  {} model(s) are not yet tracked.", self.models.len());
         println!();
         println!("  [L]ive DDL — apply changes directly (development only)");
@@ -393,10 +389,7 @@ impl FileRunner {
 
         match choice.as_str() {
             "L" => {
-                println!(
-                    "[ryx] Applying {} live change(s) to {alias}",
-                    changes.len()
-                );
+                println!("[ryx] Applying {} live change(s) to {alias}", changes.len());
                 let pool = ryx_backend::pool::get(Some(alias))?;
                 let backend_type = ryx_backend::pool::get_backend(Some(alias))?;
                 let ddl = generate_ddl(changes, backend_type);
@@ -412,8 +405,7 @@ impl FileRunner {
                 Ok(results)
             }
             "A" => {
-                let detector =
-                    Autodetector::new(self.model_entries.clone(), &self.migrations_dir);
+                let detector = Autodetector::new(self.model_entries.clone(), &self.migrations_dir);
                 let ops = detector.detect();
                 if ops.is_empty() {
                     println!("[ryx] No changes detected.");
@@ -484,14 +476,12 @@ pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
     match op {
         Operation::CreateSchema { schema_name, .. } => {
             let sql = ddl.create_schema(schema_name);
-            if sql.is_empty() {
-                vec![]
-            } else {
-                vec![sql]
-            }
+            if sql.is_empty() { vec![] } else { vec![sql] }
         }
         Operation::CreateTable {
-            table_name, columns, ..
+            table_name,
+            columns,
+            ..
         } => {
             let cols: Vec<ColumnState> = columns
                 .iter()
@@ -535,27 +525,25 @@ pub fn operation_to_sql(ddl: &DDLGenerator, op: &Operation) -> Vec<String> {
             old_column,
             new_column,
             ..
-        } => {
-            ddl.alter_column(
-                table_name,
-                &ColumnState {
-                    name: old_column.name.clone(),
-                    db_type: old_column.db_type.clone(),
-                    nullable: old_column.nullable,
-                    primary_key: old_column.primary_key,
-                    unique: old_column.unique,
-                    default: old_column.default.clone(),
-                },
-                &ColumnState {
-                    name: new_column.name.clone(),
-                    db_type: new_column.db_type.clone(),
-                    nullable: new_column.nullable,
-                    primary_key: new_column.primary_key,
-                    unique: new_column.unique,
-                    default: new_column.default.clone(),
-                },
-            )
-        }
+        } => ddl.alter_column(
+            table_name,
+            &ColumnState {
+                name: old_column.name.clone(),
+                db_type: old_column.db_type.clone(),
+                nullable: old_column.nullable,
+                primary_key: old_column.primary_key,
+                unique: old_column.unique,
+                default: old_column.default.clone(),
+            },
+            &ColumnState {
+                name: new_column.name.clone(),
+                db_type: new_column.db_type.clone(),
+                nullable: new_column.nullable,
+                primary_key: new_column.primary_key,
+                unique: new_column.unique,
+                default: new_column.default.clone(),
+            },
+        ),
         Operation::CreateIndex {
             table_name,
             index_name,
