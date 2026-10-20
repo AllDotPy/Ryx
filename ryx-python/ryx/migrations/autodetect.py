@@ -36,7 +36,7 @@ for automatic multi-database routing:
 
 Operation types:
 
-  ==================  ===================================================
+    
   CreateTable         ``(table, columns, model=None)``
   AddField            ``(table, column, model=None)``
   RemoveField         ``(table, column)``         (destructive, not auto-generated)
@@ -44,7 +44,7 @@ Operation types:
   CreateIndex         ``(table, name, fields, unique, model=None)``
   DeleteIndex         ``(table, index_name)``
   RunSQL              ``(sql, reverse_sql)``
-  ==================  ===================================================
+    
 
 The ``model`` parameter stores a **class reference** (not a string). The
 runner reads ``model._meta.database`` to route each operation to the correct

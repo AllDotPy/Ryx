@@ -51,7 +51,7 @@ impl<T: Model + FromRow> ObjectsManager<T> {
     }
 }
 
-// === INSERT BUILDER ===
+//  INSERT BUILDER 
 
 pub struct InsertBuilder<T> {
     values: Vec<(String, SqlValue)>,

@@ -1,9 +1,9 @@
 use crate::migration::{ChangeKind, ColumnState, SchemaChange, TableState};
 use ryx_query::Backend;
 
-// ============================================================
+// 
 // DDL Generator
-// ============================================================
+// 
 
 /// Backend-aware DDL generator.
 ///
@@ -413,9 +413,9 @@ impl DDLGenerator {
     }
 }
 
-// ============================================================
+// 
 // Free functions (backward-compat)
-// ============================================================
+// 
 
 pub fn col_type_for_backend(db_type: &str, backend: Backend) -> String {
     match backend {

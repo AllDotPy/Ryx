@@ -59,11 +59,11 @@ export default function SearchBar() {
 
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+      if (e.key  '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
         e.preventDefault();
         inputRef.current?.focus();
       }
-      if (e.key === 'Escape') {
+      if (e.key  'Escape') {
         setIsOpen(false);
         inputRef.current?.blur();
       }
@@ -135,7 +135,7 @@ export default function SearchBar() {
         </div>
       )}
 
-      {isOpen && query.length >= 2 && results.length === 0 && (
+      {isOpen && query.length >= 2 && results.length  0 && (
         <div className="ryx-search__dropdown">
           <div className="ryx-search__no-results">No results for "{query}"</div>
         </div>
