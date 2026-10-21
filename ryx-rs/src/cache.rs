@@ -117,7 +117,7 @@ impl CacheBackend for MemoryCache {
 pub mod redis_backend {
     use async_trait::async_trait;
     use redis::AsyncCommands;
-    use ryx_common::RyxResult;
+    use ryx_common::{RyxError, RyxResult};
 
     use super::CacheBackend;
 
@@ -168,7 +168,7 @@ pub mod redis_backend {
                 .await
                 .map_err(|e| RyxError::Internal(e.to_string()))?;
             let _: () = conn
-                .set_ex(&full_key, value, cache_ttl as usize)
+                .set_ex(&full_key, value, cache_ttl)
                 .await
                 .map_err(|e| RyxError::Internal(e.to_string()))?;
             Ok(())
