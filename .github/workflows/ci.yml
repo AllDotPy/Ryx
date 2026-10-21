@@ -42,22 +42,51 @@ jobs:
       # - name: Clippy (warnings as errors)
       #   run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # Rust unit tests
+  # Rust unit + integration tests
   rust-tests:
     name: Rust Tests
     runs-on: ubuntu-latest
     needs: rust-lint
+    # multi_schema_test needs a live PostgreSQL.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ryx_integration_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PG_TEST_URL: postgres://postgres:postgres@localhost:5432/ryx_integration_test
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
 
+      # Do NOT use `--all-features` here: enabling the `python` feature makes
+      # the native test binaries fail to link against PyO3 symbols. Run the
+      # crates that actually have tests, with their default features.
       - name: Run Rust tests
-        run: cargo test --all-features
+        run: |
+          cargo test -p ryx-query --lib
+          cargo test -p ryx-rs --lib --tests
+
+      # Compile-check every feature combination (incl. `cache-redis`) without
+      # linking native test binaries.
+      - name: Check all features compile
+        run: cargo check --workspace --all-features
 
   # Python integration tests  
   python-tests:
